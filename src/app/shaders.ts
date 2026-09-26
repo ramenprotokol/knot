@@ -61,10 +61,19 @@ void main() {
 export const hullVertex = /* glsl */ `
 uniform float uExtrude;
 uniform float uLift;
+uniform float uForeshorten;
+attribute vec3 aTangent;
 void main() {
-  vec4 mv = modelViewMatrix * vec4(position + normal * uExtrude, 1.0);
+  // How much the rope here lies across the picture (1) rather than running towards the viewer
+  // (0). Where it tilts towards the viewer, one stretch of rope sits in front of the next, and
+  // a full halo (it reaches 0.37 out and 0.3 forward) would cut gaps into the strand itself
+  // once the tilt passes about 25°; so the halo shrinks with the tilt.
+  vec3 t = normalMatrix * aTangent;
+  float across = length(t.xy) / max(length(t), 1e-6);
+  float k = mix(1.0, 0.1 + 0.9 * smoothstep(0.8, 0.97, across), uForeshorten);
+  vec4 mv = modelViewMatrix * vec4(position + normal * uExtrude * k, 1.0);
   // Pull the hull towards the viewer so it covers strands just behind it (never its own rope).
-  mv.z += uLift;
+  mv.z += uLift * k;
   gl_Position = projectionMatrix * mv;
 }
 `;

@@ -145,6 +145,6 @@ export function createFlatScene(host: HTMLElement, layer: SVGSVGElement): SceneA
     onFrame(cb) {
       frameCb = cb;
     },
-    probe: () => ({ webgl2: false, inkPixels: 0, width, height }),
+    probe: () => ({ webgl2: false, inkPixels: 0, width, height, ropeAt: [] }),
   };
 }

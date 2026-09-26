@@ -7,7 +7,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { launch, sleep } from '../../scripts/cdp.mjs';
 import { headersFor, parseHeaders, startServer } from '../../scripts/serve.mjs';
-import { encodeKnot } from '../../src/topology/share.ts';
+import { encodeKnot, quantise } from '../../src/topology/share.ts';
+import { fitToRadius, resampleClosed } from '../../src/topology/geometry.ts';
+import { torusKnotCurve, trefoilCurve } from '../../src/topology/presets.ts';
 
 const dist = fileURLToPath(new URL('../../dist', import.meta.url));
 let server;
@@ -190,8 +192,11 @@ test('bad and hostile links get a clear message and never hang the tab', async (
       // A fresh query string forces a full page load for each link.
       await b.goto(`${base}?v=${visit++}${hash}`, { readyTimeout: 8000 });
       assert.ok(Date.now() - t0 < 8000);
-      const note = await b.evaluate('document.getElementById("figure-note").textContent');
-      assert.match(note, /couldn't be read/);
+      // The note must actually be on screen, not just present in the DOM.
+      const note = await b.evaluate(
+        '(n => (n.hidden || getComputedStyle(n).display === "none" || n.getBoundingClientRect().height < 10) ? "[not shown]" : n.innerText)(document.getElementById("figure-note"))',
+      );
+      assert.match(note, /couldn't be read/, `${hash.slice(0, 20)}: ${note}`);
       assert.match(note, re);
       assert.equal((await summary(b)).headline, 'Consistent with the trefoil (3₁)');
     }
@@ -276,4 +281,185 @@ test('cache rules: long cache only on hashed assets', async () => {
     assert.match(headersFor(rules, `/${a}`)['cache-control'], /immutable/);
   }
   assert.doesNotMatch(headersFor(rules, '/THIRD-PARTY-NOTICES.txt')['cache-control'] ?? '', /max-age/);
+});
+
+/** Signs in the crossing list, as "id:+" strings. */
+const signs = (b) => b.evaluate('[...document.querySelectorAll("#crossing-list li")].map((li) => li.dataset.id + ":" + li.querySelector(".desc").textContent.trim()[0])');
+
+test('flipping a crossing changes that crossing and no other (cinquefoil turned 88°)', async () => {
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(base);
+    await b.click('.preset[data-id="cinquefoil"]');
+    await b.evaluate('document.getElementById("figure").focus()');
+    for (let i = 0; i < 11; i++) await b.key('ArrowDown');
+    await sleep(100);
+    const start = await signs(b);
+    assert.ok(start.length >= 10, `${start.length} crossings`);
+    for (let id = 1; id <= start.length; id++) {
+      const before = await signs(b);
+      await b.evaluate(`document.querySelector('#crossing-list button.flip[data-id="${id}"]').click()`);
+      await sleep(60);
+      const after = await signs(b);
+      const changed = before.filter((x, i) => x !== after[i]).map((x) => Number(x.split(':')[0]));
+      assert.deepEqual(changed, [id], `flip ${id}`);
+      await b.evaluate(`document.querySelector('#crossing-list button.flip[data-id="${id}"]').click()`);
+      await sleep(60);
+    }
+    assert.deepEqual(await signs(b), start, 'flipping each back restores the diagram');
+    assert.deepEqual(b.problems, []);
+  });
+});
+
+test('twelve relaxes in a row keep the rope its size, and Share still works', async () => {
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(base);
+    await b.click('.preset[data-id="cinquefoil"]');
+    const r0 = (await summary(b)).radius;
+    for (let k = 0; k < 12; k++) {
+      await b.evaluate('document.getElementById("btn-relax").click()');
+      await waitIdle(b);
+    }
+    const s = await summary(b);
+    assert.ok(Math.abs(s.radius / r0 - 1) < 0.1, `radius ${s.radius} vs ${r0}`);
+    assert.match(s.headline, /cinquefoil/);
+    await b.evaluate('document.getElementById("btn-share").click()');
+    await sleep(100);
+    assert.match(await b.evaluate('document.getElementById("share-url").value'), /#k=1\./);
+    assert.deepEqual(b.problems, []);
+  });
+});
+
+test('dragging a 99-crossing rope leaves the polynomial until the release', async () => {
+  const c = quantise(fitToRadius(torusKnotCurve(2, 99, 480), 60));
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(`${base}#${encodeKnot(c, [0, 0, 0, 1])}`, { readyTimeout: 15000 });
+    let s = await summary(b);
+    assert.equal(s.crossings, 99);
+    assert.notEqual(s.delta, null);
+    const headline = s.headline;
+    const [x, y] = await b.evaluate('(r => [r.x + r.width / 2, r.y + r.height / 2])(document.getElementById("figure").getBoundingClientRect())');
+    await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await b.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    const times = [];
+    // Small turns: this torus knot keeps its 99 crossings for about 0.03 rad, then jumps past
+    // the 100-crossing cap.
+    for (let k = 1; k <= 3; k++) {
+      await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + k, y, button: 'left', buttons: 1 });
+      // Live analysis runs on the next animation frame (slow under software WebGL): wait for it.
+      for (let i = 0; i < 40 && !(await summary(b)).deferred; i++) await sleep(50);
+      s = await summary(b);
+      assert.equal(s.crossings, 99);
+      assert.equal(s.deferred, true, 'polynomial deferred mid-drag');
+      assert.equal(s.headline, headline, 'the verdict stays up while dragging');
+      times.push(s.ms);
+    }
+    await b.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + 3, y, button: 'left', buttons: 0, clickCount: 1 });
+    await sleep(300);
+    s = await summary(b);
+    assert.equal(s.deferred, false);
+    assert.notEqual(s.delta, null, 'worked out on release');
+    console.log(`# drag analysis ms (polynomial deferred): ${times.map((t) => t.toFixed(1)).join(', ')}; on release: ${s.ms.toFixed(1)}`);
+    assert.deepEqual(b.problems, []);
+  });
+});
+
+test('at 1280×800 the tools, the how-to line and the whole figure are above the fold', async () => {
+  await withPage({ width: 1280, height: 800 }, async (b) => {
+    await b.goto(base);
+    const r = await b.evaluate(
+      '["btn-draw", "btn-share", "howline", "figure"].map((id) => { const e = document.getElementById(id).getBoundingClientRect(); return [e.top, e.bottom]; })',
+    );
+    for (const [top, bottom] of r) assert.ok(top >= 0 && bottom <= 800, `${top}–${bottom}`);
+    assert.ok(r[0][1] <= r[3][0], 'Draw a knot sits above the figure');
+    const line = await b.evaluate('(e => [e.innerText, Math.round(e.getBoundingClientRect().height)])(document.getElementById("howline"))');
+    for (const re of [/turn it/, /Draw a knot/, /flip/]) assert.match(line[0], re);
+    assert.ok(line[1] <= 24, `the how-to fits on one line (${line[1]} px tall)`);
+  });
+});
+
+test('the idle sway pauses while the working is open', async () => {
+  await withPage({ width: 1280, height: 800 }, async (b) => {
+    await b.goto(base);
+    assert.equal((await summary(b)).swaying, true);
+    await b.click('#working summary');
+    await sleep(50);
+    assert.equal(await b.evaluate('document.getElementById("working").open'), true);
+    assert.equal((await summary(b)).swaying, false);
+    await b.click('#working summary');
+    await sleep(50);
+    assert.equal((await summary(b)).swaying, true);
+  });
+});
+
+/** A closed path across the figure, in page coordinates: f maps t in [0, 2π) to [-1, 1]². */
+async function figurePath(b, count, f) {
+  await b.evaluate('window.scrollTo(0, 0)');
+  const [x, y, w, h] = await b.evaluate('(r => [r.x, r.y, r.width, r.height])(document.getElementById("figure").getBoundingClientRect())');
+  const cx = x + w / 2, cy = y + h / 2, s = Math.min(w, h) * 0.4;
+  const pts = [];
+  for (let i = 0; i <= count; i++) {
+    const [u, v] = f((2 * Math.PI * i) / count * 0.985 + 0.2);
+    pts.push([cx + s * u, cy + s * v]);
+  }
+  return pts;
+}
+
+test('a one-crossing loop reads "1 crossing"', async () => {
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(base);
+    await b.click('#btn-draw');
+    await b.drag(await figurePath(b, 200, (t) => [Math.cos(t), 0.5 * Math.sin(2 * t)]));
+    await sleep(150);
+    assert.equal((await summary(b)).crossings, 1);
+    const meta = await b.evaluate('document.getElementById("fig-meta").textContent');
+    assert.match(meta, /· 1 crossing ·/);
+    assert.doesNotMatch(meta, /1 crossings/);
+  });
+});
+
+test('on a dense drawing no two crossing labels overlap', async () => {
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(base);
+    await b.click('#btn-draw');
+    // A loop with a big nine-fold wobble: about twenty crossings, many near the centre.
+    await b.drag(await figurePath(b, 900, (t) => [(Math.cos(t) + 0.8 * Math.cos(9 * t)) / 1.8, (Math.sin(t) + 0.8 * Math.sin(8 * t)) / 1.8]));
+    await sleep(300);
+    const s = await summary(b);
+    assert.ok(s.crossings >= 15, `${s.crossings} crossings`);
+    assert.equal(s.callouts, s.crossings);
+    const check = async (when) => {
+      const badges = await b.evaluate('[...document.querySelectorAll("#overlay .callout .badge")].map((c) => [Number(c.getAttribute("cx")), Number(c.getAttribute("cy"))])');
+      let closest = Infinity;
+      for (let i = 0; i < badges.length; i++) {
+        for (let j = i + 1; j < badges.length; j++) closest = Math.min(closest, Math.hypot(badges[i][0] - badges[j][0], badges[i][1] - badges[j][1]));
+      }
+      assert.ok(closest >= 23, `${when}: closest two labels are ${closest.toFixed(1)} px apart (badges are 23 px across)`);
+      // Each leader starts at its crossing as drawn now.
+      const drawn = await b.evaluate('[...document.querySelectorAll("#overlay .callout .dot")].map((c) => [Number(c.getAttribute("cx")), Number(c.getAttribute("cy"))])');
+      const dots = await b.evaluate('window.__knot.dots()');
+      dots.forEach((d, k) => assert.ok(Math.hypot(d[0] - drawn[k][0], d[1] - drawn[k][1]) < 1, `${when}: dot ${k + 1} is on its crossing`));
+    };
+    await check('as drawn');
+    // Turn it: the labels are laid out again for the new view.
+    await b.evaluate('document.getElementById("figure").focus()');
+    for (let i = 0; i < 3; i++) await b.key('ArrowUp');
+    await sleep(600);
+    await check('turned');
+    assert.deepEqual(b.problems, []);
+  });
+});
+
+test('a sparse 8-point shared rope: every crossing dot sits on the drawn rope', async () => {
+  const sparse = quantise(resampleClosed(trefoilCurve(300), 3, 8));
+  await withPage({ width: 1280, height: 800, reducedMotion: true }, async (b) => {
+    await b.goto(`${base}#${encodeKnot(sparse, [0, 0, 0, 1])}`);
+    const s = await summary(b);
+    assert.equal(s.crossings, 3);
+    assert.equal(s.points, 8);
+    await sleep(200);
+    const dots = await b.evaluate('window.__knot.dots()');
+    const probe = await b.evaluate(`window.__knot.probe(${JSON.stringify(dots)})`);
+    assert.deepEqual(probe.ropeAt, [true, true, true], `dots at ${JSON.stringify(dots)}`);
+    assert.deepEqual(b.problems, []);
+  });
 });

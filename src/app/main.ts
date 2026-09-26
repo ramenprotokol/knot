@@ -10,7 +10,7 @@ import {
   frameFromQuaternion,
   pointCount,
 } from '../topology/geometry.ts';
-import { MAX_STROKE_POINTS, flipCrossing, liftDrawing, prepareStroke } from '../topology/lift.ts';
+import { MAX_STROKE_POINTS, checkFlip, flipCrossing, liftDrawing, prepareStroke } from '../topology/lift.ts';
 import { PRESETS, type Preset } from '../topology/presets.ts';
 import { format } from '../topology/poly.ts';
 import { formatPD } from '../topology/pd.ts';
@@ -32,6 +32,8 @@ const SVG = 'http://www.w3.org/2000/svg';
 const IDENTITY: Quat = [0, 0, 0, 1];
 const PLATES = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 const CALLOUT_LIMIT = 60;
+/** While dragging, views with more crossings than this skip the polynomial until release. */
+const LIVE_POLYNOMIAL_LIMIT = 40;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 function qMul(a: Quat, b: Quat): Quat {
@@ -180,6 +182,8 @@ interface State {
   shareable: boolean;
   relax: RelaxStats | null;
   view: ViewSearch | null;
+  /** The last analysis of this rope that has a polynomial (shown while a drag defers it). */
+  lastFull: Analysis | null;
   busy: boolean;
   mode: 'look' | 'draw';
   swayAllowed: boolean;
@@ -196,6 +200,7 @@ const state: State = {
   shareable: true,
   relax: null,
   view: null,
+  lastFull: null,
   busy: false,
   mode: 'look',
   swayAllowed: !reduceMotion.matches,
@@ -212,8 +217,14 @@ function hideNote(): void {
   note.hidden = true;
 }
 
+const workingBox = el<HTMLDetailsElement>('working');
+
+/**
+ * The idle sway is decoration: the analysis always uses the still view. It pauses while the
+ * working is open, so the picture then matches the projection being explained.
+ */
 function updateSway(): void {
-  scene.setSway(state.swayAllowed && !reduceMotion.matches && state.mode === 'look' && !state.busy);
+  scene.setSway(state.swayAllowed && !reduceMotion.matches && state.mode === 'look' && !state.busy && !workingBox.open);
 }
 
 function setBusy(b: boolean): void {
@@ -232,6 +243,7 @@ function setKnot(curve: Float64Array, rotation: Quat, meta: Meta, extra: { relax
   state.meta = meta;
   state.relax = extra.relax ?? null;
   state.view = extra.view ?? null;
+  state.lastFull = null;
   if (!extra.keepSelection) state.selected = null;
   state.centre = centroid(state.curve);
   scene.setCurve(state.curve);
@@ -243,8 +255,9 @@ function setKnot(curve: Float64Array, rotation: Quat, meta: Meta, extra: { relax
 }
 
 function analyseNow(live = false): void {
+  if (state.analysis?.alexander && !state.analysis.deferred) state.lastFull = state.analysis;
   const t0 = performance.now();
-  state.analysis = analyse(state.curve, frameFromQuaternion(state.rotation));
+  state.analysis = analyse(state.curve, frameFromQuaternion(state.rotation), live ? { deferPolynomialAbove: LIVE_POLYNOMIAL_LIMIT } : {});
   state.ms = performance.now() - t0;
   if (state.selected !== null && !state.analysis.diagram?.crossings.some((c) => c.id === state.selected)) state.selected = null;
   renderPanel(live);
@@ -256,18 +269,22 @@ function analyseNow(live = false): void {
 function renderPanel(live: boolean): void {
   const a = state.analysis;
   if (!a) return;
-  verdictHead.innerHTML = rich(a.wording.headline);
-  verdictDetail.innerHTML = rich(a.wording.detail);
+  // While a drag defers the polynomial, the verdict stays the one worked out for this rope
+  // (Δ is the same from every view); the diagram, its numbers and the PD code stay live.
+  const full = a.deferred && state.lastFull ? state.lastFull : a;
+  verdictHead.innerHTML = rich(full.wording.headline);
+  verdictDetail.innerHTML = rich(full.wording.detail);
   const n = a.diagram ? a.diagram.crossings.length : null;
   const rows: string[] = [];
   rows.push(
     `<dt>Crossings</dt><dd>${n ?? '—'} in this view${n !== null && n >= 3 ? '<small>A diagram only bounds the crossing number from above: the knot may need fewer.</small>' : ''}</dd>`,
   );
-  const delta = a.alexander?.delta;
-  rows.push(`<dt>Δ(t)</dt><dd class="math">${delta ? esc(format(delta)) : '—'}</dd>`);
-  if (a.alexander?.knotDeterminant != null) rows.push(`<dt>Determinant</dt><dd>${a.alexander.knotDeterminant} <small>|Δ(−1)|</small></dd>`);
+  const delta = full.alexander?.delta;
+  const later = a.deferred ? '<small>Worked out again when you let go.</small>' : '';
+  rows.push(`<dt>Δ(t)</dt><dd class="math">${delta ? esc(format(delta)) : '—'}${later}</dd>`);
+  if (full.alexander?.knotDeterminant != null) rows.push(`<dt>Determinant</dt><dd>${full.alexander.knotDeterminant} <small>|Δ(−1)|</small></dd>`);
   if (a.diagram) rows.push(`<dt>Writhe</dt><dd>${minus(a.diagram.writhe)}</dd>`);
-  const v = a.verdict;
+  const v = full.verdict;
   const tableText =
     v.kind === 'match'
       ? v.candidates.map((k) => k.label).join(' or ')
@@ -298,7 +315,7 @@ function renderPanel(live: boolean): void {
         ? `${cs.length} crossings: too many to label on the figure. Relax the rope or try Fewest crossings.`
         : 'Flip swaps which strand goes over. On the figure, tap a numbered callout.';
 
-  if (!live || (document.getElementById('working') as HTMLDetailsElement).open) {
+  if (!live || workingBox.open) {
     workingBody.innerHTML = renderWorking(a, {
       selected: state.selected,
       frame: a.diagram?.frame ?? frameFromQuaternion(state.rotation),
@@ -312,12 +329,12 @@ function renderPanel(live: boolean): void {
   figTitle.textContent = state.meta.title;
   figNum.textContent = state.meta.plate;
   const writhe = a.diagram ? ` · writhe ${minus(a.diagram.writhe)}` : '';
-  figMeta.textContent = `${pointCount(state.curve)} points · ${n ?? '?'} crossings${writhe}`;
+  figMeta.textContent = `${pointCount(state.curve)} points · ${n ?? '?'} crossing${n === 1 ? '' : 's'}${writhe}`;
   figure.setAttribute(
     'aria-label',
-    `${state.meta.title}: ${n ?? 'unknown'} crossings in this view. ${a.wording.headline}. Drag, or use the arrow keys, to turn it.`,
+    `${state.meta.title}: ${n ?? 'unknown'} crossing${n === 1 ? '' : 's'} in this view. ${full.wording.headline}. Drag, or use the arrow keys, to turn it.`,
   );
-  document.documentElement.dataset.verdict = a.verdict.kind;
+  document.documentElement.dataset.verdict = full.verdict.kind;
 }
 
 function select(id: number | null): void {
@@ -346,7 +363,10 @@ crossingList.addEventListener('focusin', (e) => {
   const li = (e.target as Element).closest<HTMLLIElement>('li');
   if (li) select(Number(li.dataset.id));
 });
-el<HTMLDetailsElement>('working').addEventListener('toggle', () => renderPanel(false));
+workingBox.addEventListener('toggle', () => {
+  updateSway();
+  renderPanel(false);
+});
 
 // ---------- callouts ----------
 
@@ -373,6 +393,7 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 function buildCallouts(): void {
   overlay.querySelectorAll('.callout').forEach((g) => g.remove());
   callouts = [];
+  layout = null;
   const cs = state.analysis?.diagram?.crossings ?? [];
   if (state.mode !== 'look' || state.busy || cs.length > CALLOUT_LIMIT) return;
   for (const c of cs) {
@@ -394,45 +415,141 @@ function buildCallouts(): void {
   positionCallouts();
 }
 
-function positionCallouts(): void {
-  if (callouts.length === 0) return;
+/** Label offsets from their anchors, worked out for one view; the sway only moves anchors. */
+let layout: { rotation: Quat; w: number; h: number; offsets: [number, number][] } | null = null;
+
+function segmentsCross(a: [number, number], b: [number, number], c: [number, number], d: [number, number]): boolean {
+  const o = (p: [number, number], q: [number, number], r: [number, number]): number => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+}
+
+/**
+ * Place every label on clear paper near its crossing: away from the rope, from the other
+ * crossings and from labels already placed, with leader lines that don't cross. Crowded
+ * crossings choose first; any overlap left over is pushed apart at the end.
+ */
+function layoutCallouts(): void {
   const [w, h] = scene.size();
   const [cx, cy] = scene.project(state.centre);
   const anchors = callouts.map((c) => scene.project(c.point));
-  // The rope's shadow on screen, so labels can sit on clear paper beside it.
-  const n = pointCount(state.curve);
-  const rope: [number, number][] = [];
-  for (let i = 0; i < n; i++) rope.push(scene.project([state.curve[3 * i]!, state.curve[3 * i + 1]!, state.curve[3 * i + 2]!]));
-  const ropePx = 0.37 / scene.unitsPerPixel() + 12;
-  const placed: [number, number][] = [];
-  const R = w < 480 ? 28 : 34;
   const margin = 16;
-  callouts.forEach((c, k) => {
+  const R = w < 480 ? 26 : 32;
+  const SEP = 27; // two badges (r = 11.5) and a little paper
+  // The rope's shadow on screen, sampled every few pixels and bucketed, so each candidate
+  // spot only looks at the rope near it.
+  const ropePx = 0.37 / scene.unitsPerPixel() + 12;
+  const CELL = 24;
+  const grid = new Map<number, number[]>();
+  const n = pointCount(state.curve);
+  const proj: [number, number][] = [];
+  for (let i = 0; i < n; i++) proj.push(scene.project([state.curve[3 * i]!, state.curve[3 * i + 1]!, state.curve[3 * i + 2]!]));
+  const key = (gx: number, gy: number): number => gx * 4099 + gy;
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = proj[i]!;
+    const [x1, y1] = proj[(i + 1) % n]!;
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 6));
+    for (let t = 0; t < steps; t++) {
+      const x = x0 + ((x1 - x0) * t) / steps, y = y0 + ((y1 - y0) * t) / steps;
+      const k = key(Math.floor(x / CELL), Math.floor(y / CELL));
+      let cell = grid.get(k);
+      if (!cell) grid.set(k, (cell = []));
+      cell.push(x, y);
+    }
+  }
+  const reach = Math.ceil((ropePx + 12) / CELL);
+  const ropeClear = (x: number, y: number): number => {
+    let best = Infinity;
+    const gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+    for (let i = -reach; i <= reach; i++) {
+      for (let j = -reach; j <= reach; j++) {
+        const cell = grid.get(key(gx + i, gy + j));
+        if (!cell) continue;
+        for (let q = 0; q < cell.length; q += 2) best = Math.min(best, Math.hypot(cell[q]! - x, cell[q + 1]! - y));
+      }
+    }
+    return best - ropePx;
+  };
+  // Crowded crossings first, while there is still room near them.
+  const crowd = anchors.map((a) => anchors.filter((b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 3 * R).length);
+  const order = callouts.map((_, k) => k).sort((p, q) => crowd[q]! - crowd[p]! || p - q);
+  const labels: ([number, number] | null)[] = callouts.map(() => null);
+  const OFFS = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.75, -1.75, 2.1, -2.1, 2.45, -2.45, 2.8, -2.8, Math.PI];
+  const RADII = [R, R * 1.4, R * 1.85, R * 2.4, R * 3.1, R * 4];
+  for (const k of order) {
     const [ax, ay] = anchors[k]!;
     let base = Math.atan2(ay - cy, ax - cx);
     if (!Number.isFinite(base) || Math.hypot(ax - cx, ay - cy) < 1) base = -Math.PI / 2;
     let best: [number, number] | null = null;
     let bestScore = -Infinity;
-    for (const off of [0, 0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.3, -2.3, Math.PI]) {
-      for (const rr of [R, R * 1.45, R * 1.9, R * 2.4]) {
+    for (const off of OFFS) {
+      for (const rr of RADII) {
         const x = ax + rr * Math.cos(base + off);
         const y = ay + rr * Math.sin(base + off);
         if (x < margin || x > w - margin || y < margin || y > h - margin) continue;
-        let clear = Infinity;
-        for (const p of placed) clear = Math.min(clear, Math.hypot(p[0] - x, p[1] - y) - 27);
+        let clear = Math.min(12, ropeClear(x, y));
+        let overlap = false;
+        let crossed = 0;
+        labels.forEach((p, j) => {
+          if (!p) return;
+          const d = Math.hypot(p[0] - x, p[1] - y);
+          if (d < SEP) overlap = true;
+          clear = Math.min(clear, d - SEP);
+          if (segmentsCross([ax, ay], [x, y], anchors[j]!, p)) crossed++;
+        });
         anchors.forEach((a, j) => {
           if (j !== k) clear = Math.min(clear, Math.hypot(a[0] - x, a[1] - y) - 18);
         });
-        for (const p of rope) clear = Math.min(clear, Math.hypot(p[0] - x, p[1] - y) - ropePx);
-        const score = Math.min(clear, 12) - Math.abs(off) * 3 - (rr / R - 1) * 6;
+        const score = clear - Math.abs(off) * 2.5 - (rr / R - 1) * 5 - crossed * 8 - (overlap ? 1000 : 0);
         if (score > bestScore) {
           bestScore = score;
           best = [x, y];
         }
       }
     }
-    const [lx, ly] = best ?? [Math.min(w - margin, Math.max(margin, ax)), Math.min(h - margin, Math.max(margin, ay - R))];
-    placed.push([lx, ly]);
+    labels[k] = best ?? [Math.min(w - margin, Math.max(margin, ax)), Math.min(h - margin, Math.max(margin, ay - R))];
+  }
+  // Push apart any labels that still overlap (only happens on very crowded figures).
+  for (let it = 0; it < 30; it++) {
+    let moved = false;
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = i + 1; j < labels.length; j++) {
+        const a = labels[i]!, b = labels[j]!;
+        let dx = b[0] - a[0], dy = b[1] - a[1];
+        let d = Math.hypot(dx, dy);
+        if (d >= SEP) continue;
+        if (d < 1e-6) {
+          dx = 1;
+          dy = 0;
+          d = 1;
+        }
+        const push = (SEP - d) / 2 + 0.5;
+        a[0] -= (dx / d) * push;
+        a[1] -= (dy / d) * push;
+        b[0] += (dx / d) * push;
+        b[1] += (dy / d) * push;
+        for (const p of [a, b]) {
+          p[0] = Math.min(w - margin, Math.max(margin, p[0]));
+          p[1] = Math.min(h - margin, Math.max(margin, p[1]));
+        }
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  layout = { rotation: scene.getRotation(), w, h, offsets: labels.map((p, k) => [p![0] - anchors[k]![0], p![1] - anchors[k]![1]]) };
+}
+
+function positionCallouts(): void {
+  if (callouts.length === 0) return;
+  const [w, h] = scene.size();
+  const rot = scene.getRotation();
+  if (!layout || layout.offsets.length !== callouts.length || layout.w !== w || layout.h !== h || layout.rotation.some((v, i) => v !== rot[i])) {
+    layoutCallouts();
+  }
+  const offsets = layout!.offsets;
+  callouts.forEach((c, k) => {
+    const [ax, ay] = scene.project(c.point);
+    const lx = ax + offsets[k]![0], ly = ay + offsets[k]![1];
     const dx = lx - ax, dy = ly - ay;
     const len = Math.hypot(dx, dy) || 1;
     c.line.setAttribute('x1', (ax + (dx / len) * 4).toFixed(1));
@@ -465,15 +582,20 @@ function flip(id: number): void {
   const d = state.analysis?.diagram;
   if (!d) return;
   const r = flipCrossing(state.curve, d, id);
-  if (!r.ok) {
-    showNote(`Could not flip that crossing: ${esc(r.error)}.`, 'error');
+  // flipCrossing checks its own result; check again after the snap to the link grid that
+  // setKnot applies, so what is shown is exactly one crossing changed.
+  const shown = r.ok ? (canQuantiseSafely(r.value) ? quantise(r.value) : r.value) : null;
+  const check = shown ? checkFlip(d, shown, id, frameFromQuaternion(state.rotation)) : null;
+  if (!r.ok || !shown || !check?.ok) {
+    const why = !r.ok ? r.error : check && !check.ok ? check.error : 'unknown';
+    showNote(`<strong>Crossing ${id} was not flipped:</strong> ${esc(why)}.`, 'error');
     return;
   }
   state.selected = id;
   const title = state.meta.title.endsWith(', edited') ? state.meta.title : `${state.meta.title}, edited`;
   clearLinkHash();
   hideNote();
-  setKnot(r.value, state.rotation, { title, plate: 'Edited', presetId: null }, { keepSelection: true });
+  setKnot(shown, state.rotation, { title, plate: 'Edited', presetId: null }, { keepSelection: true });
 }
 
 function loadPreset(p: Preset, index: number): void {
@@ -556,8 +678,9 @@ function relaxNow(): void {
   const r = createRelaxer(state.curve);
   const finish = (): void => {
     const stats = r.stats();
-    // Recentre (a pure translation cannot change the knot).
-    const c = Float64Array.from(r.curve);
+    // Back to the starting size (a similarity), then recentre (a translation): neither can
+    // change the knot, and repeated presses no longer grow the rope.
+    const c = r.shaped();
     const [mx, my, mz] = centroid(c);
     for (let i = 0; i < c.length; i += 3) {
       c[i]! -= mx;
@@ -573,7 +696,8 @@ function relaxNow(): void {
       setBusy(false);
       setKnot(c, target, { ...state.meta, title }, { relax: stats, view: vs });
       showNote(
-        `<strong>Relaxed in ${stats.steps} steps.</strong> Turned to the view with the fewest crossings found (${vs.crossings}). The knot cannot have changed: no point ever moved more than 0.45 × the smallest gap in the rope.`,
+        `<strong>Relaxed in ${stats.steps} steps</strong>, then scaled back to its starting size, and turned to the view with the fewest crossings found (${vs.crossings}). ` +
+          'The knot cannot have changed: no point ever moved more than 0.45 × the smallest gap in the rope, and scaling the whole figure is harmless.',
       );
     });
   };
@@ -584,7 +708,7 @@ function relaxNow(): void {
   }
   const tick = (): void => {
     const s = r.step(6);
-    scene.setCurve(r.curve);
+    scene.setCurve(r.shaped());
     showNote(`Relaxing… step ${s.steps}`);
     if (s.done) finish();
     else requestAnimationFrame(tick);
@@ -779,7 +903,15 @@ btnShare.addEventListener('click', () => {
     shareStatus.textContent = 'This rope has two strands too close together to snap to the link grid safely. Relax it first.';
     return;
   }
-  const frag = encodeKnot(state.curve, state.rotation);
+  let frag: string;
+  try {
+    frag = encodeKnot(state.curve, state.rotation);
+  } catch (e) {
+    shareUrl.value = '';
+    const why = e instanceof RangeError ? e.message : 'it could not be encoded';
+    shareStatus.textContent = `This rope can't be put in a link (${why}). Relax it, or pick a plate.`;
+    return;
+  }
   history.replaceState(null, '', `${location.pathname}${location.search}#${frag}`);
   shareUrl.value = location.href;
   shareUrl.select();
@@ -794,22 +926,32 @@ btnShare.addEventListener('click', () => {
     });
 });
 
-function loadFromHash(): boolean {
+/**
+ * Load the rope in the link, if there is one. A link that can't be read falls back to the
+ * trefoil, and the note saying why is shown after that plate has loaded (loading a plate
+ * clears the note). Returns the note's HTML, or '' when there was nothing to report.
+ */
+function loadFromHashOrTrefoil(): string {
   const h = location.hash;
-  if (!h.startsWith('#k=')) return false;
-  const d = decodeKnot(h);
-  if (!d.ok) {
-    showNote(`<strong>That share link couldn't be read:</strong> ${esc(d.error)}. Showing the trefoil instead.`, 'error');
-    return false;
+  if (h.startsWith('#k=')) {
+    const d = decodeKnot(h);
+    if (d.ok) {
+      hideNote();
+      setKnot(d.knot.curve, d.knot.rotation, { title: 'Shared knot', plate: 'From a link', presetId: null });
+      return '';
+    }
+    loadPreset(PRESETS[1]!, 1);
+    return `<strong>That share link couldn't be read:</strong> ${esc(d.error)}. Showing the trefoil instead.`;
   }
-  hideNote();
-  setKnot(d.knot.curve, d.knot.rotation, { title: 'Shared knot', plate: 'From a link', presetId: null });
-  return true;
+  loadPreset(PRESETS[1]!, 1);
+  return '';
 }
 
 window.addEventListener('hashchange', () => {
   if (location.hash.startsWith('#k=') && !state.busy) {
-    if (!loadFromHash()) loadPreset(PRESETS[1]!, 1);
+    if (state.mode === 'draw') endDraw(false);
+    const problem = loadFromHashOrTrefoil();
+    if (problem) showNote(problem, 'error');
   }
 });
 
@@ -839,8 +981,10 @@ reduceMotion.addEventListener('change', updateSway);
 
 // ---------- start ----------
 
-if (!loadFromHash()) loadPreset(PRESETS[1]!, 1);
-if (rendererNote) showNote(esc(rendererNote), 'error');
+{
+  const notes = [loadFromHashOrTrefoil(), rendererNote ? esc(rendererNote) : ''].filter(Boolean);
+  if (notes.length) showNote(notes.join('<br>'), 'error');
+}
 updateSway();
 document.documentElement.dataset.status = 'ready';
 
@@ -852,7 +996,10 @@ declare global {
 }
 window.__knot = {
   summary: () => ({
-    headline: state.analysis?.wording.headline ?? '',
+    headline: (state.analysis?.deferred && state.lastFull ? state.lastFull : state.analysis)?.wording.headline ?? '',
+    deferred: state.analysis?.deferred === true,
+    ms: state.ms,
+    radius: boundingRadius(state.curve),
     crossings: state.analysis?.diagram?.crossings.length ?? null,
     pd: state.analysis ? formatPD(state.analysis.pd) : '',
     delta: state.analysis?.alexander?.delta ? format(state.analysis.alexander.delta) : null,
@@ -864,5 +1011,7 @@ window.__knot = {
     shareable: state.shareable,
     callouts: callouts.length,
   }),
-  probe: () => scene.probe(),
+  /** Where the crossing dots are drawn (CSS pixels in the figure). */
+  dots: () => callouts.map((c) => scene.project(c.point)),
+  probe: (at?: [number, number][]) => scene.probe(at),
 };

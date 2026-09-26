@@ -33,6 +33,15 @@
       <div class="presets__list" id="presets"></div>
     </nav>
 
+    <div class="toolbar" role="toolbar" aria-label="Rope tools">
+      <button type="button" class="btn" id="btn-draw" aria-pressed="false">Draw a knot</button>
+      <button type="button" class="btn" id="btn-relax">Relax the rope</button>
+      <button type="button" class="btn" id="btn-simplest">Fewest crossings</button>
+      <button type="button" class="btn btn--quiet" id="btn-top">Face on</button>
+      <button type="button" class="btn btn--quiet" id="btn-share">Share</button>
+    </div>
+    <p class="howline" id="howline">Drag the figure to turn it. <em>Draw a knot</em> to sketch your own; tap a number to flip it.</p>
+
     <div class="figure" id="figure" tabindex="0" role="img" aria-roledescription="3D figure" aria-label="The rope" aria-describedby="how">
       <canvas id="scene" aria-hidden="true"></canvas>
       <svg class="overlay" id="overlay" aria-hidden="true"></svg>
@@ -44,13 +53,6 @@
       <p class="caption__meta" id="fig-meta"></p>
     </div>
 
-    <div class="toolbar" role="toolbar" aria-label="Rope tools">
-      <button type="button" class="btn" id="btn-draw" aria-pressed="false">Draw a knot</button>
-      <button type="button" class="btn" id="btn-relax">Relax the rope</button>
-      <button type="button" class="btn" id="btn-simplest">Fewest crossings</button>
-      <button type="button" class="btn btn--quiet" id="btn-top">Face on</button>
-      <button type="button" class="btn btn--quiet" id="btn-share">Share</button>
-    </div>
     <p class="share-out" id="share-out" hidden>
       <label for="share-url" class="label">Link to this knot</label>
       <input id="share-url" type="text" readonly>
@@ -90,8 +92,8 @@
 
 <footer class="colophon">
   <p><span class="label">Colophon</span>
-    The rope is drawn with <a href="https://threejs.org/">three.js</a>; every crossing, code and polynomial is computed on this page in TypeScript, with exact integer arithmetic.
-    Knot table: D. Rolfsen, <i>Knots and Links</i> (1976), Appendix C, via the <a href="https://katlas.org/wiki/The_Rolfsen_Knot_Table">Knot Atlas</a>; cross-reference: C. Livingston and A. H. Moore, <a href="https://knotinfo.org/">KnotInfo: Table of Knot Invariants</a>.
+    The rope is drawn with <a href="https://threejs.org/">three.js</a>; everything is computed on this page in TypeScript. The Alexander polynomial is computed with exact integer arithmetic; finding the crossings uses floating point with safeguards (tolerances, plus a tiny turn of the view when a corner lands exactly on another strand). The idle sway is decoration: the analysis always uses the still view.
+    Knot table: D. Rolfsen, <i>Knots and Links</i> (1976), Appendix C, via the <a href="https://katlas.org/wiki/The_Rolfsen_Knot_Table">Knot Atlas</a>; see also: C. Livingston and A. H. Moore, <a href="https://knotinfo.org/">KnotInfo: Table of Knot Invariants</a>.
     <a href="THIRD-PARTY-NOTICES.txt">Third-party notices</a>. Built by Ramen Protocol with AI assistance (Claude).</p>
 </footer>
 <script type="module" src="%JS%"></script>

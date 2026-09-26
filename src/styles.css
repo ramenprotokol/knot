@@ -246,7 +246,7 @@ h1 {
   display: flex;
   align-items: baseline;
   gap: 14px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .presets__list {
@@ -288,6 +288,8 @@ h1 {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 0.86;
+  /* Keep the whole plate, tools included, above the fold on a laptop screen. */
+  max-height: max(340px, calc(100vh - 350px));
   border: 1.5px solid var(--rule);
   background: var(--paper);
   touch-action: none;
@@ -465,7 +467,13 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 12px;
-  margin-top: 16px;
+  margin: 0 0 10px;
+}
+
+.howline {
+  margin: 0 0 10px;
+  font: italic 15px/1.4 var(--serif);
+  color: var(--ink-2);
 }
 
 .share-out {

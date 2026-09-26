@@ -159,7 +159,7 @@ export function renderWorking(a: Analysis, ctx: WorkingContext): string {
   }
   out.push('</tbody></table></div>');
   out.push(
-    `<p class="note">Source: D. Rolfsen, <i>Knots and Links</i> (1976), Appendix C, via the Knot Atlas; cross-reference KnotInfo (Livingston &amp; Moore). ` +
+    `<p class="note">Source: D. Rolfsen, <i>Knots and Links</i> (1976), Appendix C, via the Knot Atlas; see also: KnotInfo (Livingston &amp; Moore). ` +
       `The unit tests recompute every row from published PD codes.</p>`,
   );
 
@@ -168,7 +168,9 @@ export function renderWorking(a: Analysis, ctx: WorkingContext): string {
     out.push(`<h3>Relaxation</h3>`);
     out.push(
       `<p>${r.steps} steps${r.done && r.steps < 600 ? ' (settled early)' : ''}. Springs resist stretching, bending smooths the rope, every point repels every other, ` +
-        `and strands closer than the rope's thickness are pushed apart. The rope stretched a little as it opened out: ${num(r.lengthStart, 1)} → ${num(r.lengthNow, 1)} units.</p>`,
+        `and strands closer than the rope's thickness are pushed apart. The rope stretched as it opened out (${num(r.lengthStart, 1)} → ${num(r.lengthNow, 1)} units), ` +
+        `so the whole figure was then scaled by ${num(r.scale, 2)} back to its starting size (now ${num(r.lengthShaped, 1)} units long). Scaling every point by the same factor cannot change a knot, ` +
+        `and it stops repeated relaxing from growing the rope.</p>`,
     );
     out.push(
       `<p>No point ever moved more than 0.45 × the smallest gap between two non-neighbouring stretches of rope (smallest gap during the run: ${num(r.minGapSeen)} units). ` +

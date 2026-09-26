@@ -89,10 +89,13 @@ Knot table data
 -------------------------------------------------------------------------------
 The Alexander polynomials of the knots up to 7 crossings (and the three composite knots
 listed) are mathematical facts, typed in by hand. No database files, tables or text were
-copied into this site. Sources and cross-checks:
+copied into this site. Source:
 
   D. Rolfsen, Knots and Links, Publish or Perish (1976), Appendix C (the knot table),
     as reproduced in the Knot Atlas: https://katlas.org/wiki/The_Rolfsen_Knot_Table
+
+See also (a standard reference; its data was not consulted for these values):
+
   C. Livingston and A. H. Moore, KnotInfo: Table of Knot Invariants, knotinfo.org,
     September 26, 2026 (citation in the form KnotInfo requests).
 
