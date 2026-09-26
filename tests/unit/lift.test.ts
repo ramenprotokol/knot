@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_DRAW_CROSSINGS, flipCrossing, liftDrawing, prepareStroke } from '../../src/topology/lift.ts';
+import { MAX_DRAW_CROSSINGS, checkFlip, flipCrossing, liftDrawing, prepareStroke, signChanges } from '../../src/topology/lift.ts';
 import { analyse } from '../../src/topology/analyse.ts';
-import { extractDiagram } from '../../src/topology/crossings.ts';
-import { TOP_FRAME, frameFromDirection, minGap, pointCount } from '../../src/topology/geometry.ts';
+import { type Diagram, extractDiagram } from '../../src/topology/crossings.ts';
+import { type Frame, type Quat, type Vec3, TOP_FRAME, frameFromDirection, frameFromQuaternion, minGap, pointCount } from '../../src/topology/geometry.ts';
 import { toNumbers } from '../../src/topology/poly.ts';
 import { PRESETS } from '../../src/topology/presets.ts';
 import { relax } from '../../src/topology/relax.ts';
+import { quantiseRotation } from '../../src/topology/share.ts';
 
 function stroke(n: number, f: (t: number) => [number, number]): number[] {
   const out: number[] = [];
@@ -17,6 +18,16 @@ function stroke(n: number, f: (t: number) => [number, number]): number[] {
 
 const trefoilStroke = () => stroke(400, (t) => [1.4 * (Math.sin(t) + 2 * Math.sin(2 * t)), 1.4 * (Math.cos(t) - 2 * Math.cos(2 * t))]);
 const eightStroke = () => stroke(500, (t) => [1.6 * (2 + Math.cos(2 * t)) * Math.cos(3 * t), 1.6 * (2 + Math.cos(2 * t)) * Math.sin(3 * t)]);
+
+/** Flip crossing `id` and check that exactly that crossing changed sign, read from the same view. */
+function flipOnly(curve: Float64Array, d: Diagram, id: number): Float64Array {
+  const f = flipCrossing(curve, d, id);
+  assert.ok(f.ok, f.ok ? '' : f.error);
+  const after = extractDiagram(f.value, d.frame);
+  assert.ok(after.ok);
+  assert.deepEqual(signChanges(d, after.diagram), [id], `flipping ${id} changed exactly crossing ${id}`);
+  return f.value;
+}
 
 function lift(raw: number[]): Float64Array {
   const p = prepareStroke(raw);
@@ -85,6 +96,7 @@ test('flipping one crossing of the trefoil drawing unties it; flipping back reti
   assert.ok(d0.ok);
   const f1 = flipCrossing(c, d0.diagram, 2);
   assert.ok(f1.ok);
+  flipOnly(c, d0.diagram, 2);
   const a1 = analyse(f1.value, TOP_FRAME);
   assert.equal(a1.pd.length, 3, 'same shadow, same crossings');
   assert.deepEqual(toNumbers(a1.alexander!.delta!), [1]);
@@ -94,6 +106,7 @@ test('flipping one crossing of the trefoil drawing unties it; flipping back reti
   assert.ok(d1.ok);
   const f2 = flipCrossing(f1.value, d1.diagram, 2);
   assert.ok(f2.ok);
+  flipOnly(f1.value, d1.diagram, 2);
   assert.deepEqual(toNumbers(analyse(f2.value, TOP_FRAME).alexander!.delta!), [1, -1, 1]);
   // Flipping does not keep adding points once the crossing already has room.
   assert.equal(pointCount(f2.value), pointCount(f1.value));
@@ -108,14 +121,65 @@ test('flipping works on a relaxed 3D rope seen from any angle', () => {
   assert.deepEqual(toNumbers(before.alexander!.delta!), [-1, 3, -1]);
   let changed = 0;
   for (const k of d.diagram.crossings) {
-    const f = flipCrossing(relaxed, d.diagram, k.id);
-    assert.ok(f.ok);
-    assert.ok(minGap(f.value).gap > 0.05, 'still a clean rope');
-    const after = analyse(f.value, frame);
+    const f = flipOnly(relaxed, d.diagram, k.id);
+    assert.ok(minGap(f).gap > 0.05, 'still a clean rope');
+    const after = analyse(f, frame);
     assert.equal(after.pd.length, before.pd.length);
     if (toNumbers(after.alexander!.delta!).join() !== '-1,3,-1') changed++;
   }
   assert.ok(changed > 0, 'some single flip changes the knot');
+});
+
+test('a flip never changes another crossing: cinquefoil turned 88° about x, crossing 10', () => {
+  // The page's arrow-down key, eleven times: turn 8° about x, then snap to the link grid.
+  let q: Quat = [0, 0, 0, 1];
+  const h = (4 * Math.PI) / 180;
+  for (let k = 0; k < 11; k++) {
+    const [x, , , w] = q;
+    const next: Quat = [w * Math.sin(h) + x * Math.cos(h), 0, 0, w * Math.cos(h) - x * Math.sin(h)];
+    const len = Math.hypot(next[0], next[3]);
+    q = quantiseRotation([next[0] / len, 0, 0, next[3] / len]);
+  }
+  const curve = PRESETS.find((p) => p.id === 'cinquefoil')!.build();
+  const d = extractDiagram(curve, frameFromQuaternion(q));
+  assert.ok(d.ok);
+  assert.ok(d.diagram.crossings.length >= 10);
+  for (const k of d.diagram.crossings) flipOnly(curve, d.diagram, k.id);
+});
+
+test('every flip of every plate, top, oblique and side-on, relaxed or not, changes exactly one crossing', () => {
+  const views: [string, Vec3 | null][] = [['top', null], ['oblique', [0.3, 0.5, 1]], ['steep', [-0.7, 0.2, 0.6]], ['side', [1, 0.1, 0.05]]];
+  let flips = 0;
+  for (const p of PRESETS) {
+    for (const relaxed of [false, true]) {
+      const c = relaxed ? relax(p.build()).curve : p.build();
+      for (const [name, dir] of views) {
+        const frame: Frame = dir ? frameFromDirection(dir) : TOP_FRAME;
+        const d = extractDiagram(c, frame);
+        assert.ok(d.ok, `${p.id} ${name}`);
+        for (const k of d.diagram.crossings) {
+          flipOnly(c, d.diagram, k.id);
+          flips++;
+        }
+      }
+    }
+  }
+  assert.ok(flips > 300, `${flips} flips checked`);
+});
+
+test('a result that changes more than the chosen crossing is refused', () => {
+  const c = lift(trefoilStroke());
+  const d = extractDiagram(c, TOP_FRAME);
+  assert.ok(d.ok);
+  // The mirror image (every depth negated) has the same shadow and every crossing flipped.
+  const mirror = Float64Array.from(c, (v, i) => (i % 3 === 2 ? -v : v));
+  const r = checkFlip(d.diagram, mirror, 1);
+  assert.equal(r.ok, false);
+  assert.match(r.ok ? '' : r.error, /also have changed crossings 2, 3/);
+  // The unchanged rope: the chosen crossing didn't flip.
+  const same = checkFlip(d.diagram, c, 1);
+  assert.equal(same.ok, false);
+  assert.match(same.ok ? '' : same.error, /did not change/);
 });
 
 test('a scribble with too many crossings is refused with a message', () => {

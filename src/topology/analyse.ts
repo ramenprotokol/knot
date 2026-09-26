@@ -17,9 +17,19 @@ export interface Analysis {
   readonly alexander: AlexanderWorking | null;
   readonly verdict: Verdict;
   readonly wording: Wording;
+  /** True when the polynomial was skipped on purpose (see AnalyseOptions). */
+  readonly deferred?: boolean;
 }
 
-export function analyse(curve: Float64Array, frame: Frame): Analysis {
+export interface AnalyseOptions {
+  /**
+   * Skip the polynomial when the view has more crossings than this. The page uses it while
+   * the figure is being dragged: Δ is the same from every view, so it can wait for the release.
+   */
+  readonly deferPolynomialAbove?: number;
+}
+
+export function analyse(curve: Float64Array, frame: Frame, opts: AnalyseOptions = {}): Analysis {
   const dr = extractDiagram(curve, frame);
   if (!dr.ok) {
     const verdict: Verdict = { kind: 'unavailable', crossings: null, reason: dr.message };
@@ -35,6 +45,10 @@ export function analyse(curve: Float64Array, frame: Frame): Analysis {
       reason: `this view has ${n} crossings and the page stops at ${MAX_ANALYSE_CROSSINGS} — relax the rope or turn it for a simpler view`,
     };
     return { diagram, pd, alexander: null, verdict, wording: describe(verdict) };
+  }
+  if (opts.deferPolynomialAbove !== undefined && n > opts.deferPolynomialAbove) {
+    const verdict: Verdict = { kind: 'unavailable', crossings: n, reason: 'it is worked out again when you let go' };
+    return { diagram, pd, alexander: null, verdict, wording: describe(verdict), deferred: true };
   }
   const alex = alexander(pd);
   if (alex.atOne !== null && alex.atOne !== 1n) {

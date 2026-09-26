@@ -1,6 +1,9 @@
 // Identification: compare the normalised Alexander polynomial with the table and word the
-// result honestly. A match means "consistent with", never "is": the Alexander polynomial
-// cannot see mirror images, and bigger knots can share a polynomial with a small one.
+// result honestly. The headline says "consistent with", never "is": the Alexander polynomial
+// cannot see mirror images, and bigger knots can share a polynomial with a small one. The
+// detail line says when the diagram is small enough to settle it: a diagram with at most 7
+// crossings shows a knot that is in the (complete) table, and Δ = 1 with at most 10 crossings
+// is the unknot.
 
 import { type Poly, equals, fromNumbers } from './poly.ts';
 import { KNOT_TABLE, type KnotEntry, MAX_TABLE_CROSSINGS } from './table.ts';
@@ -16,6 +19,12 @@ export type Verdict =
   | { readonly kind: 'unavailable'; readonly crossings: number | null; readonly reason: string };
 
 const UNKNOT = KNOT_TABLE[0]!;
+
+/**
+ * The smallest nontrivial knots with Alexander polynomial 1 (the Kinoshita–Terasaka and Conway
+ * knots) have 11 crossings, so Δ = 1 on a diagram with at most 10 crossings means the unknot.
+ */
+export const UNKNOT_DETECTED_BELOW = 11;
 
 /** Table rows whose Δ equals `delta` (after the same normalisation). */
 export function candidatesFor(delta: Poly): KnotEntry[] {
@@ -58,23 +67,33 @@ export function describe(v: Verdict): Wording {
     case 'match': {
       const [first] = v.candidates;
       if (!first) throw new Error('match without candidates');
+      const n = v.crossings;
       if (first.id === '0_1') {
         return {
           headline: 'Consistent with the unknot (0₁)',
           detail:
-            'Its Alexander polynomial is 1. The unknot is the only knot in the table (up to 7 crossings) with Δ = 1, ' +
-            'but some larger knots — the smallest have 11 crossings — also have Δ = 1, so this is strong evidence, not proof.',
+            n <= UNKNOT_DETECTED_BELOW - 1
+              ? `Its Alexander polynomial is 1. Apart from the unknot, the smallest knots with Δ = 1 have ${UNKNOT_DETECTED_BELOW} crossings, ` +
+                `and this view shows only ${n}, so this is certain: the rope can be untangled.`
+              : 'Its Alexander polynomial is 1. The unknot is the only knot in the table (up to 7 crossings) with Δ = 1, ' +
+                `but some larger knots — the smallest have ${UNKNOT_DETECTED_BELOW} crossings — also have Δ = 1, so this is strong evidence, not proof.`,
         };
       }
-      const mirror = v.candidates.some((k) => k.chiral)
+      const chiral = v.candidates.some((k) => k.chiral);
+      const mirror = chiral
         ? ' The Alexander polynomial cannot tell a knot from its mirror image, so left- and right-handed versions look the same here.'
         : '';
+      // A diagram with n crossings shows a knot with at most n crossings. The table holds every
+      // knot with up to 7, so for n ≤ 7 the knot is in it, and the polynomial picks it out.
+      const complete = n <= MAX_TABLE_CROSSINGS;
+      const why = `The table holds every knot with up to ${MAX_TABLE_CROSSINGS} crossings, and this view shows only ${n}, so the knot must be in it`;
       if (v.candidates.length === 1) {
         return {
           headline: `Consistent with ${nameOf(first)}`,
-          detail:
-            `Its Alexander polynomial matches ${first.label} and nothing else in the table of knots up to ${MAX_TABLE_CROSSINGS} crossings. ` +
-            `Knots with more crossings can share a polynomial, so this is evidence, not proof.${mirror}`,
+          detail: complete
+            ? `Its Alexander polynomial matches ${first.label} and nothing else in the table. ${why}: this is certain${chiral ? ', up to mirror image' : ''}.${mirror}`
+            : `Its Alexander polynomial matches ${first.label} and nothing else in the table of knots up to ${MAX_TABLE_CROSSINGS} crossings. ` +
+              `Knots with more crossings can share a polynomial, so this is evidence, not proof.${mirror}`,
         };
       }
       const names = v.candidates.map(nameOf);
@@ -83,7 +102,8 @@ export function describe(v: Verdict): Wording {
         headline: `Consistent with ${list}`,
         detail:
           `${v.candidates.length} knots in the table share this Alexander polynomial, and the polynomial cannot tell them apart. ` +
-          `Knots with more crossings can share it too.${mirror}`,
+          (complete ? `${why}, so it is one of these.` : 'Knots with more crossings can share it too.') +
+          mirror,
       };
     }
     case 'no-match':

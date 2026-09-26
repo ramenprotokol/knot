@@ -5,7 +5,7 @@
 // Source: D. Rolfsen, "Knots and Links" (1976), Appendix C, as reproduced in the Knot Atlas
 // (katlas.org, "The Rolfsen Knot Table"), checked on 2026-09-26; see also C. Livingston and
 // A. H. Moore, "KnotInfo: Table of Knot Invariants", knotinfo.org. The polynomials are
-// mathematical facts, typed in by hand; tests/unit/table.test.ts recomputes every one of them
+// mathematical facts, typed in by hand; tests/unit/alexander.test.ts recomputes every one of them
 // from the Knot Atlas PD codes with this project's own Alexander-matrix code.
 //
 // Normalisation: coefficients lowest power first, lowest power t⁰, and Δ(1) = +1.
@@ -61,6 +61,6 @@ export const KNOT_TABLE: readonly KnotEntry[] = [
 ];
 
 export const TABLE_SOURCE =
-  'Rolfsen, Knots and Links (1976), Appendix C, via the Knot Atlas (katlas.org); cross-reference: Livingston & Moore, KnotInfo (knotinfo.org).';
+  'Rolfsen, Knots and Links (1976), Appendix C, via the Knot Atlas (katlas.org); see also: Livingston & Moore, KnotInfo (knotinfo.org).';
 
 export const MAX_TABLE_CROSSINGS = 7;

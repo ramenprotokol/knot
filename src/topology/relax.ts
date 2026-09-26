@@ -10,8 +10,13 @@
 // smallest gap between non-neighbouring segments. When every point moves less than half that
 // gap along a straight line, no two segments can meet, so the knot type cannot change —
 // this is a guarantee, not a hope. Steps are capped (`maxSteps`), so the work is bounded.
+//
+// Repulsion stretches the rope as it opens out (by up to about 40%), and each run measures
+// its rest length from the rope it is given, so repeated runs would compound. `shaped()`
+// therefore hands back the rope scaled back to the size it started at: a uniform scaling is a
+// similarity, which cannot change the knot, and it keeps the drawn rope's apparent thickness.
 
-import { type Closest, pointCount, segmentClosest, totalLength } from './geometry.ts';
+import { type Closest, type Vec3, boundingRadius, centroid, pointCount, segmentClosest, totalLength } from './geometry.ts';
 
 export interface RelaxParams {
   /** Hard cap on steps (a relaxer never runs longer). */
@@ -57,13 +62,37 @@ export interface RelaxStats {
   readonly restLength: number;
   readonly lengthStart: number;
   readonly lengthNow: number;
+  /** Uniform scale that brings the rope back to its starting size (see `shaped`). */
+  readonly scale: number;
+  /** Length of the rope after that scaling. */
+  readonly lengthShaped: number;
 }
 
 export interface Relaxer {
   /** Run up to k more steps; returns the stats after them. */
   step(k: number): RelaxStats;
+  /** The working positions (they grow as the rope opens out). */
   readonly curve: Float64Array;
   stats(): RelaxStats;
+  /** A copy of the rope, centred where it started and scaled back to its starting bounding radius. */
+  shaped(): Float64Array;
+}
+
+/**
+ * A copy of `c` moved so its centroid is `centre` and scaled about it so its bounding radius
+ * is `radius`. Translation and uniform scaling cannot change a knot.
+ */
+export function similarTo(c: Float64Array, centre: Vec3, radius: number): { curve: Float64Array; scale: number } {
+  const [cx, cy, cz] = centroid(c);
+  const r = boundingRadius(c, [cx, cy, cz]);
+  const k = r > 0 && radius > 0 ? radius / r : 1;
+  const out = new Float64Array(c.length);
+  for (let i = 0; i < c.length; i += 3) {
+    out[i] = centre[0] + (c[i]! - cx) * k;
+    out[i + 1] = centre[1] + (c[i + 1]! - cy) * k;
+    out[i + 2] = centre[2] + (c[i + 2]! - cz) * k;
+  }
+  return { curve: out, scale: k };
 }
 
 /** 1/r² repulsion skips point pairs this close along the rope (springs and bending hold them). */
@@ -77,6 +106,8 @@ export function createRelaxer(start: Float64Array, params: RelaxParams = DEFAULT
   const mx = new Float64Array(n), my = new Float64Array(n), mz = new Float64Array(n), hl = new Float64Array(n);
   const lengthStart = totalLength(P);
   const L0 = lengthStart / n;
+  const startCentre = centroid(P);
+  const startRadius = boundingRadius(P, startCentre);
   const D = params.thickness;
   // Contact ignores segment pairs closer than this many segments along the rope.
   const contactSkip = Math.max(2, Math.ceil((1.6 * D) / L0));
@@ -152,17 +183,25 @@ export function createRelaxer(start: Float64Array, params: RelaxParams = DEFAULT
   gap = pairs();
   minGapSeen = gap;
 
-  const stats = (): RelaxStats => ({
-    steps,
-    done,
-    gap,
-    minGapSeen,
-    lastMove,
-    lastCap,
-    restLength: L0,
-    lengthStart,
-    lengthNow: totalLength(P),
-  });
+  const shaped = (): { curve: Float64Array; scale: number } => similarTo(P, startCentre, startRadius);
+
+  const stats = (): RelaxStats => {
+    const lengthNow = totalLength(P);
+    const { scale } = shaped();
+    return {
+      steps,
+      done,
+      gap,
+      minGapSeen,
+      lastMove,
+      lastCap,
+      restLength: L0,
+      lengthStart,
+      lengthNow,
+      scale,
+      lengthShaped: lengthNow * scale,
+    };
+  };
 
   const one = (): void => {
     F.set(C);
@@ -225,6 +264,7 @@ export function createRelaxer(start: Float64Array, params: RelaxParams = DEFAULT
   return {
     curve: P,
     stats,
+    shaped: () => shaped().curve,
     step(k: number): RelaxStats {
       for (let s = 0; s < k && !done; s++) one();
       return stats();
@@ -232,9 +272,9 @@ export function createRelaxer(start: Float64Array, params: RelaxParams = DEFAULT
   };
 }
 
-/** Run to completion (bounded by maxSteps). */
+/** Run to completion (bounded by maxSteps); the rope comes back at its starting size. */
 export function relax(start: Float64Array, params: RelaxParams = DEFAULT_RELAX): { curve: Float64Array; stats: RelaxStats } {
   const r = createRelaxer(start, params);
   const stats = r.step(params.maxSteps);
-  return { curve: Float64Array.from(r.curve), stats };
+  return { curve: r.shaped(), stats };
 }

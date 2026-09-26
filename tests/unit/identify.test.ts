@@ -49,14 +49,47 @@ test('7₁ is found, and 9₁ (beyond the table) is reported as not in the table
   assert.equal(nine.wording.headline, 'Not in our table');
 });
 
-test('fewer than three crossings is certain; three or more is only ever "consistent with"', () => {
+test('fewer than three crossings is certain; three or more is only ever "consistent with" in the headline', () => {
   assert.equal(identify(fromNumbers([1]), 2).kind, 'trivial-diagram');
   assert.match(describe(identify(fromNumbers([1]), 2)).detail, /certain/);
-  for (const [delta, n] of [[[1, -1, 1], 3], [[-1, 3, -1], 6], [[1], 9], [[2, -3, 2], 5], [[1, -2, 3, -2, 1], 6]] as const) {
+  for (const [delta, n] of [[[1, -1, 1], 3], [[-1, 3, -1], 6], [[1], 9], [[1], 11], [[2, -3, 2], 5], [[1, -1, 1], 8], [[1, -2, 3, -2, 1], 6]] as const) {
     const w = describe(identify(fromNumbers([...delta]), n));
     assert.match(w.headline, /^Consistent with /);
-    assert.match(w.detail, /not proof|can share/);
     assert.doesNotMatch(w.headline + w.detail, /\b(definitely|proven|proves|certainly)\b/i);
+  }
+});
+
+test('small diagrams settle it: a unique match with ≤ 7 crossings is certain up to mirror image', () => {
+  // The table holds every knot with up to 7 crossings, so a 3–7 crossing view must show one of them.
+  const trefoil = describe(identify(fromNumbers([1, -1, 1]), 3));
+  assert.match(trefoil.detail, /this is certain, up to mirror image/);
+  assert.match(trefoil.detail, /mirror image/);
+  const fiveTwo = describe(identify(fromNumbers([2, -3, 2]), 7));
+  assert.match(fiveTwo.detail, /shows only 7, so the knot must be in it: this is certain, up to mirror image/);
+  // The figure-eight is its own mirror image, so plain "certain".
+  const eight = describe(identify(fromNumbers([-1, 3, -1]), 6));
+  assert.match(eight.detail, /this is certain\./);
+  assert.doesNotMatch(eight.detail, /mirror/);
+  // Granny or square: certain to be one of the two, never which.
+  const gs = describe(identify(fromNumbers([1, -2, 3, -2, 1]), 6));
+  assert.match(gs.detail, /so it is one of these/);
+  assert.doesNotMatch(gs.detail, /this is certain/);
+  // Above 7 crossings the same polynomial is only evidence.
+  const big = describe(identify(fromNumbers([1, -1, 1]), 8));
+  assert.match(big.detail, /evidence, not proof/);
+  assert.doesNotMatch(big.detail, /certain/);
+});
+
+test('Δ = 1 is the unknot for certain up to 10 crossings, and strong evidence beyond', () => {
+  for (const n of [3, 7, 10]) {
+    const w = describe(identify(fromNumbers([1]), n));
+    assert.equal(w.headline, 'Consistent with the unknot (0₁)');
+    assert.match(w.detail, new RegExp(`shows only ${n}, so this is certain: the rope can be untangled`));
+  }
+  for (const n of [11, 40]) {
+    const w = describe(identify(fromNumbers([1]), n));
+    assert.match(w.detail, /strong evidence, not proof/);
+    assert.doesNotMatch(w.detail, /certain/);
   }
 });
 

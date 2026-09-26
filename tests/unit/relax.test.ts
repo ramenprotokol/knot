@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { DEFAULT_RELAX, createRelaxer, relax } from '../../src/topology/relax.ts';
 import { PRESETS } from '../../src/topology/presets.ts';
 import { analyse, simplestView } from '../../src/topology/analyse.ts';
-import { TOP_FRAME, frameFromDirection, maxDisplacement, minGap } from '../../src/topology/geometry.ts';
+import { TOP_FRAME, boundingRadius, centroid, frameFromDirection, maxDisplacement, minGap } from '../../src/topology/geometry.ts';
+import { canQuantiseSafely, decodeKnot, encodeKnot, quantise } from '../../src/topology/share.ts';
 import { equals } from '../../src/topology/poly.ts';
 
 test('relaxing never changes the knot: Δ is the same before and after, for every preset', () => {
@@ -53,4 +54,39 @@ test('a short run stretches the rope only modestly (under 20%) and the step cap 
 test('relaxing opens the three-twist knot to its minimal five-crossing view', () => {
   const c = relax(PRESETS.find((p) => p.id === 'three-twist')!.build()).curve;
   assert.equal(simplestView(c, [0, 0, 1]).crossings, 5);
+});
+
+test('relaxing comes back at the starting size, so twelve presses in a row neither grow the rope nor break Share', () => {
+  for (const id of ['trefoil', 'cinquefoil', 'tangled']) {
+    let c = PRESETS.find((p) => p.id === id)!.build();
+    const r0 = boundingRadius(c);
+    const before = analyse(c, TOP_FRAME).alexander!.delta!;
+    for (let k = 0; k < 12; k++) {
+      c = relax(c).curve;
+      // What the page does next: recentre (a translation) and snap to the link grid when safe.
+      const [x, y, z] = centroid(c);
+      for (let i = 0; i < c.length; i += 3) {
+        c[i]! -= x;
+        c[i + 1]! -= y;
+        c[i + 2]! -= z;
+      }
+      if (canQuantiseSafely(c)) c = quantise(c);
+      const r = boundingRadius(c);
+      assert.ok(Math.abs(r / r0 - 1) < 0.1, `${id}, press ${k + 1}: radius ${r.toFixed(2)} vs ${r0.toFixed(2)}`);
+    }
+    assert.ok(minGap(c).gap > 0.1, `${id}: strands still apart`);
+    const best = simplestView(c, [0, 0, 1]);
+    const a = analyse(c, frameFromDirection(best.direction));
+    assert.ok(a.alexander?.delta && equals(a.alexander.delta, before), `${id}: same knot after 12 relaxes`);
+    const link = encodeKnot(c, [0, 0, 0, 1]);
+    const back = decodeKnot(link);
+    assert.ok(back.ok, `${id}: the link decodes`);
+  }
+});
+
+test('the relax stats report the scaling back to the starting size', () => {
+  const { curve, stats } = relax(PRESETS.find((p) => p.id === 'trefoil')!.build());
+  assert.ok(stats.scale > 0 && stats.scale < 1, `scale ${stats.scale}`);
+  assert.ok(Math.abs(stats.lengthShaped - stats.lengthNow * stats.scale) < 1e-9);
+  assert.ok(Math.abs(boundingRadius(curve) - boundingRadius(PRESETS.find((p) => p.id === 'trefoil')!.build())) < 1e-9);
 });
