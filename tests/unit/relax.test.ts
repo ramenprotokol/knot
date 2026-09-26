@@ -42,7 +42,7 @@ test('relaxation is deterministic', () => {
   assert.deepEqual(relax(c).curve, relax(c).curve);
 });
 
-test('the rope keeps roughly its length and the work is capped', () => {
+test('a short run stretches the rope only modestly (under 20%) and the step cap holds', () => {
   for (const p of PRESETS) {
     const { stats } = relax(p.build(), { ...DEFAULT_RELAX, maxSteps: 50 });
     assert.ok(stats.steps <= 50);
