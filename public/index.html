@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-status="loading">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knot — which knot did you tie?</title>
+<meta name="description" content="Draw a closed rope in 3D; knot works out which knot you tied, and shows the maths: crossings, PD code, Alexander matrix and polynomial.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<link rel="stylesheet" href="%CSS%">
+<script src="%BOOT%"></script>
+</head>
+<body>
+<a class="skip" href="#identification">Skip to the identification</a>
+<header class="masthead">
+  <div class="masthead__title">
+    <p class="kicker">Field guide · No. 9</p>
+    <h1>knot</h1>
+    <p class="subtitle">Draw a closed rope. We work out which knot you tied — and show the maths.</p>
+  </div>
+  <div class="masthead__tools">
+    <button type="button" class="btn btn--quiet" id="theme-toggle" aria-pressed="false">Dark paper</button>
+  </div>
+</header>
+
+<main class="sheet">
+  <section class="plate" aria-labelledby="fig-title">
+    <nav class="presets" aria-label="Example knots">
+      <p class="label">Plates</p>
+      <div class="presets__list" id="presets"></div>
+    </nav>
+
+    <div class="figure" id="figure" tabindex="0" role="img" aria-roledescription="3D figure" aria-label="The rope" aria-describedby="how">
+      <canvas id="scene" aria-hidden="true"></canvas>
+      <svg class="overlay" id="overlay" aria-hidden="true"></svg>
+    </div>
+    <p class="figure__note" id="figure-note" role="status" hidden></p>
+
+    <div class="caption">
+      <p class="caption__fig"><span class="label" id="fig-num">Fig. 1</span> <span id="fig-title">Trefoil</span></p>
+      <p class="caption__meta" id="fig-meta"></p>
+    </div>
+
+    <div class="toolbar" role="toolbar" aria-label="Rope tools">
+      <button type="button" class="btn" id="btn-draw" aria-pressed="false">Draw a knot</button>
+      <button type="button" class="btn" id="btn-relax">Relax the rope</button>
+      <button type="button" class="btn" id="btn-simplest">Fewest crossings</button>
+      <button type="button" class="btn btn--quiet" id="btn-top">Face on</button>
+      <button type="button" class="btn btn--quiet" id="btn-share">Share</button>
+    </div>
+    <p class="share-out" id="share-out" hidden>
+      <label for="share-url" class="label">Link to this knot</label>
+      <input id="share-url" type="text" readonly>
+      <span id="share-status" role="status"></span>
+    </p>
+
+  </section>
+
+  <section class="howto" aria-label="How to use it">
+    <ol class="how" id="how">
+      <li><strong>Draw.</strong> Press <em>Draw a knot</em>, then drag one loop that crosses itself. Let go and the ends join.</li>
+      <li><strong>Choose.</strong> Tap a numbered crossing to swap which strand goes over. Crossings start out alternating.</li>
+      <li><strong>Turn and relax.</strong> Drag the figure (or use the arrow keys) to turn it. <em>Relax</em> lets the rope settle without passing through itself.</li>
+    </ol>
+  </section>
+
+  <section class="findings" id="identification" aria-labelledby="id-title">
+    <p class="label" id="id-title">Identification</p>
+    <div class="verdict" aria-live="polite">
+      <h2 id="verdict-head">…</h2>
+      <p id="verdict-detail"></p>
+    </div>
+    <dl class="facts" id="facts"></dl>
+
+    <div class="crossings">
+      <p class="label">Crossings in this view</p>
+      <ol class="crossing-list" id="crossing-list"></ol>
+      <p class="hint" id="crossing-hint"></p>
+    </div>
+
+    <details class="working" id="working">
+      <summary>Show the working</summary>
+      <div id="working-body"></div>
+    </details>
+  </section>
+</main>
+
+<footer class="colophon">
+  <p><span class="label">Colophon</span>
+    The rope is drawn with <a href="https://threejs.org/">three.js</a>; every crossing, code and polynomial is computed on this page in TypeScript, with exact integer arithmetic.
+    Knot table: D. Rolfsen, <i>Knots and Links</i> (1976), Appendix C, via the <a href="https://katlas.org/wiki/The_Rolfsen_Knot_Table">Knot Atlas</a>; cross-reference: C. Livingston and A. H. Moore, <a href="https://knotinfo.org/">KnotInfo: Table of Knot Invariants</a>.
+    <a href="THIRD-PARTY-NOTICES.txt">Third-party notices</a>. Built by Ramen Protocol with AI assistance (Claude).</p>
+</footer>
+<script type="module" src="%JS%"></script>
+</body>
+</html>
