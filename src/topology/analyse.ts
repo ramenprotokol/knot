@@ -110,10 +110,13 @@ export function simplestView(curve: Float64Array, current: Vec3, count = 64): Vi
       bestScore = s;
     }
   }
+  // A degenerate current view has no score above, but the page reads it after a tiny nudge;
+  // report the count it shows.
+  const shown = Number.isFinite(now.count) ? null : extractDiagram(curve, frameFromDirection(current));
   return {
     direction: best,
     crossings: Number.isFinite(bestScore.count) ? bestScore.count : -1,
     tried: count + 1,
-    currentCrossings: Number.isFinite(now.count) ? now.count : -1,
+    currentCrossings: Number.isFinite(now.count) ? now.count : shown?.ok ? shown.diagram.crossings.length : -1,
   };
 }

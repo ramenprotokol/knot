@@ -179,7 +179,7 @@ export function renderWorking(a: Analysis, ctx: WorkingContext): string {
   }
   if (ctx.view) {
     out.push(
-      `<p class="note">View search: looked from ${ctx.view.tried} directions; the fewest crossings seen was ${ctx.view.crossings} (it was ${ctx.view.currentCrossings} before). ` +
+      `<p class="note">View search: looked from ${ctx.view.tried} directions; the fewest crossings seen was ${ctx.view.crossings}${ctx.view.currentCrossings >= 0 ? ` (it was ${ctx.view.currentCrossings} before)` : ''}. ` +
         `That is only an upper bound on the knot's true crossing number.</p>`,
     );
   }

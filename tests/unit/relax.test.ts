@@ -90,3 +90,14 @@ test('the relax stats report the scaling back to the starting size', () => {
   assert.ok(Math.abs(stats.lengthShaped - stats.lengthNow * stats.scale) < 1e-9);
   assert.ok(Math.abs(boundingRadius(curve) - boundingRadius(PRESETS.find((p) => p.id === 'trefoil')!.build())) < 1e-9);
 });
+
+test('the view search reports the starting view as the page shows it, even when that view needs a nudge', () => {
+  // Seen exactly from the top, a corner of the figure-eight and cinquefoil plates sits on
+  // another strand's shadow; the page reads that view after a tiny nudge. The search must
+  // report the same count as "before", never -1.
+  for (const p of PRESETS) {
+    const c = p.build();
+    const shown = analyse(c, frameFromDirection([0, 0, 1])).pd.length;
+    assert.equal(simplestView(c, [0, 0, 1]).currentCrossings, shown, p.id);
+  }
+});
