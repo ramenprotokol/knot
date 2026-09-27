@@ -463,3 +463,37 @@ test('a sparse 8-point shared rope: every crossing dot sits on the drawn rope', 
     assert.deepEqual(b.problems, []);
   });
 });
+
+test('on a phone, a second finger neither restarts a drawing nor spins the figure', async () => {
+  await withPage({ width: 390, height: 844, mobile: true, deviceScaleFactor: 2, reducedMotion: true }, async (b) => {
+    await b.goto(base);
+    const touch = (type, points) => b.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+    await b.click('#btn-draw');
+    await b.evaluate('document.getElementById("figure").scrollIntoView({ block: "center" })');
+    await sleep(100);
+    const [fx, fy] = await b.evaluate('(() => { const r = document.getElementById("figure").getBoundingClientRect(); return [r.x, r.y]; })()');
+    const path = await trefoilPath(b);
+    const rest = [fx + 12, fy + 12]; // a second finger resting in a corner
+    await touch('touchStart', [path[0]]);
+    for (let i = 1; i < path.length; i++) await touch(i < 40 ? 'touchMove' : i === 40 ? 'touchStart' : 'touchMove', i < 40 ? [path[i]] : [path[i], rest]);
+    await touch('touchEnd', []);
+    await sleep(150);
+    let s = await summary(b);
+    assert.equal(s.mode, 'look');
+    assert.equal(s.crossings, 3, 'the whole trefoil was drawn');
+    assert.equal(s.headline, 'Consistent with the trefoil (3₁)');
+
+    // Turning: one finger moves 10 px while another rests far away. The view barely turns.
+    const [cx, cy] = [path[0][0] - 40, path[0][1]];
+    await touch('touchStart', [[cx, cy]]);
+    await touch('touchStart', [[cx, cy], rest]);
+    for (let d = 2; d <= 10; d += 2) await touch('touchMove', [[cx + d, cy], rest]);
+    await touch('touchEnd', []);
+    await sleep(150);
+    const vz = await b.evaluate('Number(/v = \\(([^,]+), ([^,]+), ([^)]+)\\)/.exec(document.getElementById("working-body").textContent)[3].replace("−", "-"))');
+    assert.ok(vz > 0.99, `the view turned too far for a 10 px drag: v.z = ${vz}`);
+    s = await summary(b);
+    assert.equal(s.delta, 't² − t + 1');
+    assert.deepEqual(b.problems, []);
+  });
+});

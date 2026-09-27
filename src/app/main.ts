@@ -789,9 +789,12 @@ let dragging = false;
 let last: [number, number] = [0, 0];
 let moved = 0;
 let liveQueued = false;
+/** The one pointer drawing or turning; a second finger (a pinch, a resting palm) is ignored. */
+let activePointer: number | null = null;
 
 figure.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || state.busy) return;
+  if (e.button !== 0 || state.busy || activePointer !== null) return;
+  activePointer = e.pointerId;
   figure.setPointerCapture(e.pointerId);
   const [x, y] = localXY(e);
   if (state.mode === 'draw') {
@@ -813,6 +816,7 @@ figure.addEventListener('pointerdown', (e) => {
 });
 
 figure.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== activePointer) return;
   const [x, y] = localXY(e);
   if (drawing) {
     if (stroke.length / 2 >= MAX_STROKE_POINTS) return;
@@ -842,7 +846,9 @@ figure.addEventListener('pointermove', (e) => {
   }
 });
 
-function endPointer(): void {
+function endPointer(e: PointerEvent): void {
+  if (e.pointerId !== activePointer) return;
+  activePointer = null;
   if (drawing) {
     finishStroke();
     return;
@@ -861,6 +867,8 @@ function endPointer(): void {
 
 figure.addEventListener('pointerup', endPointer);
 figure.addEventListener('pointercancel', endPointer);
+// A safety net: if capture is ever lost without an up or cancel, the figure still frees up.
+figure.addEventListener('lostpointercapture', endPointer);
 
 figure.addEventListener('keydown', (e) => {
   if (state.mode !== 'look' || state.busy) {
