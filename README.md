@@ -2,6 +2,8 @@
 
 Draw a closed rope in 3D; the app works out which knot you tied, and shows the maths.
 
+**Live:** https://knot-e6b.pages.dev
+
 ![knot: a figure-eight knot drawn as an engraved rope with numbered crossings, beside its identification](docs/screenshot.png)
 
 It looks like a page from a climbing manual: cream paper, an ink-outlined rope with cross-hatched shading and a laid-rope texture, crossings numbered like a figure's callouts, and one red mark for the crossing in hand. Dark paper with light ink is the same illustration.
