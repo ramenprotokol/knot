@@ -1,5 +1,5 @@
-// Builds dist/ from a clean clone: bundles the TypeScript (three.js included) with
-// content-hashed names, copies the static files, and writes THIRD-PARTY-NOTICES.txt.
+// Builds dist/ from a clean clone: bundles the TypeScript (three.js included) and the CSS (with
+// its fonts) under content-hashed names, copies the static files, and writes THIRD-PARTY-NOTICES.txt.
 // Usage: npm run build
 import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
@@ -22,8 +22,11 @@ const result = await build({
   minify: true,
   sourcemap: false,
   legalComments: 'none',
+  // Fonts referenced from the stylesheet are copied into assets/ under content-hashed names.
+  loader: { '.woff2': 'file' },
   outdir: join(dist, 'assets'),
   entryNames: '[name]-[hash]',
+  assetNames: '[name]-[hash]',
   metafile: true,
   logLevel: 'warning',
 });
@@ -53,9 +56,67 @@ const threeLicence = (await readFile(join(root, 'node_modules/three/LICENSE'), '
 const bundledThree = Object.keys(result.metafile.inputs).some((p) => p.includes('node_modules/three/'));
 if (!bundledThree) throw new Error('build: expected three.js in the bundle');
 
-const OFL_SUMMARY = `SIL Open Font License, Version 1.1 — https://openfontlicense.org/open-font-license-official-text/
-The font is loaded by the visitor's browser from Google Fonts (fonts.googleapis.com /
-fonts.gstatic.com); no font files are included in this site's files.`;
+// The self-hosted fonts: each family's licence file (src/fonts/*-OFL.txt, as published with the
+// family in github.com/google/fonts) and the files that ship, by source stem. The build fails on a
+// font in dist/ that is not listed here, or a listed one that did not ship.
+const FONTS = [
+  {
+    family: 'Barlow Condensed',
+    version: '1.408',
+    licence: 'barlow-condensed-OFL.txt',
+    source: 'https://github.com/jpt/barlow (files as served by https://fonts.google.com/specimen/Barlow+Condensed)',
+    files: { 'barlow-condensed-500': 'Medium 500, Latin', 'barlow-condensed-600': 'SemiBold 600, Latin', 'barlow-condensed-700': 'Bold 700, Latin' },
+  },
+  {
+    family: 'IBM Plex Mono',
+    version: '2.3',
+    licence: 'ibm-plex-mono-OFL.txt',
+    embedded: 'Copyright 2017 IBM Corp. All rights reserved.',
+    source: 'https://github.com/IBM/plex (files as served by https://fonts.google.com/specimen/IBM+Plex+Mono)',
+    files: { 'ibm-plex-mono-400': 'Regular 400, Latin', 'ibm-plex-mono-500': 'Medium 500, Latin' },
+  },
+  {
+    family: 'Source Serif 4',
+    version: '4.004',
+    licence: 'source-serif-4-OFL.txt',
+    embedded: '© 2014 - 2021 Adobe Systems Incorporated (http://www.adobe.com/), with Reserved Font Name ‘Source’.',
+    source: 'https://github.com/adobe-fonts/source-serif (files as served by https://fonts.google.com/specimen/Source+Serif+4)',
+    files: {
+      'source-serif-4-roman-latin': 'Roman, variable: wght 200-900, opsz 8-60; Latin',
+      'source-serif-4-roman-latin-ext': 'Roman, variable: wght 200-900, opsz 8-60; Latin Extended',
+      'source-serif-4-roman-greek': 'Roman, variable: wght 200-900, opsz 8-60; Greek',
+      'source-serif-4-italic-latin': 'Italic 400, variable: opsz 8-60; Latin',
+      'source-serif-4-italic-greek': 'Italic 400, variable: opsz 8-60; Greek',
+    },
+  },
+];
+const fontOutputs = outputs.filter((p) => /\.(woff2?|ttf|otf|eot)$/i.test(p));
+const shipped = new Set();
+const OFL_START = /^-+\nSIL OPEN FONT LICENSE Version 1\.1/m;
+/** The licence body from the "SIL OPEN FONT LICENSE" banner on, with trailing spaces trimmed. */
+const oflBody = (text) => text.slice(text.search(OFL_START)).split('\n').map((l) => l.trimEnd()).join('\n').trim();
+let oflText = null;
+const fontSections = [];
+for (const font of FONTS) {
+  const licence = (await readFile(join(root, 'src/fonts', font.licence), 'utf8')).replace(/\r\n/g, '\n');
+  const copyright = licence.slice(0, licence.indexOf('This Font Software is licensed')).trim();
+  if (!/^Copyright/.test(copyright) || licence.search(OFL_START) < 0) throw new Error(`build: src/fonts/${font.licence} is not an OFL 1.1 licence file`);
+  // Every family uses the same OFL 1.1 text (only the FAQ link above it differs), so it is printed once.
+  oflText ??= oflBody(licence);
+  if (oflBody(licence) !== oflText) throw new Error(`build: src/fonts/${font.licence} differs from the OFL 1.1 text printed in the notices`);
+  const lines = [`${font.family} ${font.version}`, `  ${copyright}`];
+  if (font.embedded) lines.push(`  (copyright notice in the font files: ${font.embedded})`);
+  lines.push(`  Licence: SIL Open Font License 1.1 (text below)`, `  Source: ${font.source}`);
+  for (const [stem, what] of Object.entries(font.files)) {
+    const file = fontOutputs.find((p) => new RegExp(`^assets/${stem}-[A-Z0-9]{8}\\.woff2$`).test(p));
+    if (!file) throw new Error(`build: font ${stem} is not in dist/assets (is it referenced from src/styles.css?)`);
+    shipped.add(file);
+    lines.push(`  Ships: ${file} (${what})`);
+  }
+  fontSections.push(lines.join('\n'));
+}
+const unknownFonts = fontOutputs.filter((p) => !shipped.has(p));
+if (unknownFonts.length) throw new Error(`build: font files without a notices entry: ${unknownFonts.join(', ')}`);
 
 const notices = `THIRD-PARTY NOTICES — knot
 ===========================
@@ -73,16 +134,21 @@ Licence: ${threePkg.license}
 ${threeLicence}
 
 -------------------------------------------------------------------------------
-Fonts (loaded from Google Fonts at run time, not bundled)
+Fonts (served from this site; SIL Open Font License 1.1)
 -------------------------------------------------------------------------------
-Barlow Condensed — Copyright 2017 The Barlow Project Authors
-  https://github.com/jpt/barlow — ${OFL_SUMMARY}
+The WOFF2 files are the ones Google Fonts serves for these families, unmodified: the
+Latin subset of each face, plus the Latin Extended and Greek subsets of Source Serif 4
+(the working uses those letters). They are copied into assets/ under content-hashed
+names, so opening the page sends nothing to a font service.
 
-Source Serif 4 — Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
-  https://github.com/adobe-fonts/source-serif — ${OFL_SUMMARY}
+${fontSections.join('\n\n')}
 
-IBM Plex Mono — Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
-  https://github.com/IBM/plex — ${OFL_SUMMARY}
+-------------------------------------------------------------------------------
+SIL Open Font License 1.1 (applies to each font family above)
+-------------------------------------------------------------------------------
+The licence text, as it appears in each family's OFL.txt below its copyright line:
+
+${oflText}
 
 -------------------------------------------------------------------------------
 Knot table data
@@ -106,5 +172,5 @@ Knot Atlas PD codes, which are quoted in the test file with attribution.
 await writeFile(join(dist, 'THIRD-PARTY-NOTICES.txt'), notices);
 
 const sizes = [];
-for (const p of [js, css, boot, 'index.html', 'THIRD-PARTY-NOTICES.txt']) sizes.push(`${p} ${((await stat(join(dist, p))).size / 1024).toFixed(1)} KiB`);
+for (const p of [js, css, boot, ...fontOutputs, 'index.html', 'THIRD-PARTY-NOTICES.txt']) sizes.push(`${p} ${((await stat(join(dist, p))).size / 1024).toFixed(1)} KiB`);
 console.log(`dist/ ready:\n  ${sizes.join('\n  ')}`);

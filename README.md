@@ -54,17 +54,17 @@ Needs Node 22.18 or later (the tests run TypeScript directly with Node's built-i
 
 ```sh
 npm ci
-npm run build      # → dist/ (hashed JS/CSS, index.html, _headers, THIRD-PARTY-NOTICES.txt)
+npm run build      # → dist/ (hashed JS/CSS/fonts, index.html, _headers, THIRD-PARTY-NOTICES.txt)
 npm test           # typecheck + unit tests + build + headless-Chrome end-to-end checks
 npm run serve      # serve dist/ locally with the production headers (random free port)
 ```
 
 - **Unit tests** (`node:test`, `tests/unit/`): crossing extraction on constructed curves (including degenerate and self-intersecting ones), PD codes for every preset, Alexander polynomials against known values with normalisation, every table row recomputed from Knot Atlas PD codes, mirror images, Bareiss vs cofactor expansion, identification of every preset (the tangled one as the unknot), granny/square listed together, 9₁ reported as not in the table, relaxation never changing Δ and never moving a point more than half the gap, twelve relaxes in a row keeping the rope's size (and its link), drawing, flipping (every flip of every plate from four views, relaxed or not, changes exactly one crossing; a result that changes more is refused), the wording rules for certain and uncertain matches, the drawn tube following a sparse polygon, the view search reporting the starting view's crossings as the page shows them, and share-link round trips plus hostile links.
-- **End-to-end** (`tests/e2e/`, headless Chrome over the DevTools protocol): no console errors, a WebGL 2 context that actually draws ink, every plate identified, drawing a trefoil with the mouse, flipping a crossing from the figure and from the list, relaxing, sharing and reopening the link, turning with the keyboard, hostile links (200 000 characters, garbage, a valid rope with 164 crossings) refused or bounded with the reason visibly on screen, flipping each crossing of a turned cinquefoil changing only that crossing, twelve relaxes then Share, dragging a 99-crossing rope with the polynomial deferred until release, the tools and figure above the fold at 1280×800, the sway pausing while the working is open, "1 crossing" in the singular, no overlapping labels on a dense drawing (before and after turning it), crossing dots on the drawn rope for a sparse link, a true 400 px phone width with no sideways scroll, a second finger on a phone neither restarting a drawing nor spinning the figure, reduced motion, the flat fallback, the notices file and the cache headers.
+- **End-to-end** (`tests/e2e/`, headless Chrome over the DevTools protocol): no console errors, a WebGL 2 context that actually draws ink, every plate identified, drawing a trefoil with the mouse, flipping a crossing from the figure and from the list, relaxing, sharing and reopening the link, turning with the keyboard, hostile links (200 000 characters, garbage, a valid rope with 164 crossings) refused or bounded with the reason visibly on screen, flipping each crossing of a turned cinquefoil changing only that crossing, twelve relaxes then Share, dragging a 99-crossing rope with the polynomial deferred until release, the tools and figure above the fold at 1280×800, the sway pausing while the working is open, "1 crossing" in the singular, no overlapping labels on a dense drawing (before and after turning it), crossing dots on the drawn rope for a sparse link, a true 400 px phone width with no sideways scroll, a second finger on a phone neither restarting a drawing nor spinning the figure, reduced motion, the flat fallback, every request staying on the site (the fonts load from it, with no console or CSP errors), the notices file and the cache headers.
 
 ## Running on Cloudflare (free)
 
-It is a static site: `dist/` deploys to Cloudflare Pages, which serves static files free with unlimited requests (limits as of 2026-09-25: 20 000 files per site, 25 MiB per file; this site is seven files, the largest about 590 KiB). There is no Worker and no server logic; nothing is stored anywhere.
+It is a static site: `dist/` deploys to Cloudflare Pages, which serves static files free with unlimited requests (limits as of 2026-09-25: 20 000 files per site, 25 MiB per file; this site is 17 files, the largest about 595 KiB). There is no Worker and no server logic; nothing is stored anywhere.
 
 ```sh
 npx wrangler pages deploy dist --project-name knot
@@ -72,7 +72,7 @@ npx wrangler pages deploy dist --project-name knot
 
 That is the plain command for anyone deploying their own copy. The owner deploys only through a guarded deploy script, which refuses unless the project's own Cloudflare account is configured; the repo has no deploy script of its own.
 
-`_headers` sets a strict Content-Security-Policy (scripts only from the site itself, fonts from Google Fonts), `no-cache` on the page, and a year-long immutable cache only on the content-hashed files in `/assets/`.
+`_headers` sets a strict Content-Security-Policy (scripts, styles and fonts only from the site itself), `no-cache` on the page, and a year-long immutable cache only on the content-hashed files in `/assets/` (the fonts included).
 
 ## Honest limitations
 
@@ -84,7 +84,7 @@ That is the plain command for anyone deploying their own copy. The owner deploys
 - **Drawing is pointer or touch only.** Keyboard users can load the plates, turn the figure with the arrow keys, flip crossings from the list, relax, and share.
 - **Limits.** Strokes are read up to 6 000 points and resampled to at most 280; a drawing may have up to 30 crossings; a rope has at most 480 points (a flip that would need more is refused); the polynomial is computed for up to 100 crossings (above that the page says so), and while dragging only up to 40; a share link is read only up to 8 192 characters, and a rope that can't be put in a link says so instead of failing.
 - **Labels on very dense views.** Labels never overlap, but on views with many crossings some sit well away from their crossing on long leader lines. Above 60 crossings they are hidden and the list is used instead.
-- The fonts load from Google Fonts; without them the page falls back to system faces.
+- **Fonts.** The three typefaces are served from the site itself (the files Google Fonts publishes, unmodified), so opening the page sends nothing to a font service. They cover Latin, plus Latin Extended and Greek for Source Serif 4; the few symbols outside those sets (subscript digits, arrows) are drawn from the system's fonts.
 
 ## Next
 
@@ -95,7 +95,7 @@ That is the plain command for anyone deploying their own copy. The owner deploys
 
 ## Third-party notices
 
-`dist/THIRD-PARTY-NOTICES.txt` (linked from the page's colophon) lists three.js 0.186.1 with its MIT licence text, the three Google Fonts (SIL Open Font License 1.1), and the sources of the knot table data. It is generated by the build and checked by the tests.
+`dist/THIRD-PARTY-NOTICES.txt` (linked from the page's colophon) lists three.js 0.186.1 with its MIT licence text, the three self-hosted font families (each shipped file, its version and copyright lines, and the SIL Open Font License 1.1 text), and the sources of the knot table data. The fonts' licence files are in `src/fonts/`. It is generated by the build and checked by the tests.
 
 ## Credits
 

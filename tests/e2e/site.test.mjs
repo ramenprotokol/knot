@@ -3,7 +3,7 @@
 // work, hostile links are refused quickly, and the page fits a true 400 px phone screen.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -253,14 +253,88 @@ test('the flat fallback (no WebGL) still identifies the knot', async () => {
   });
 });
 
+// The self-hosted font files (source stems in src/fonts/): Latin for every face, plus Latin
+// Extended and Greek for Source Serif 4, whose text in the working uses tᵏ and Δ.
+const FONT_FILES = [
+  'barlow-condensed-500',
+  'barlow-condensed-600',
+  'barlow-condensed-700',
+  'ibm-plex-mono-400',
+  'ibm-plex-mono-500',
+  'source-serif-4-italic-greek',
+  'source-serif-4-italic-latin',
+  'source-serif-4-roman-greek',
+  'source-serif-4-roman-latin',
+  'source-serif-4-roman-latin-ext',
+];
+const hashedFonts = async () => (await readdir(`${dist}/assets`)).filter((f) => f.endsWith('.woff2')).sort();
+
+test('fonts ship from this site: no Google Fonts in dist/, CSP allows only this site, every face hashed and referenced', async () => {
+  const assets = await readdir(`${dist}/assets`);
+  const fonts = await hashedFonts();
+  assert.deepEqual(fonts.map((f) => f.replace(/-[A-Z0-9]{8}\.woff2$/, '')), FONT_FILES, 'content-hashed font files in dist/assets/');
+  const cssName = assets.find((f) => f.endsWith('.css'));
+  const css = await readFile(`${dist}/assets/${cssName}`, 'utf8');
+  for (const f of fonts) assert.match(css, new RegExp(`url\\(["']?\\./${f.replace(/\./g, '\\.')}["']?\\)`), `${f} is referenced from the stylesheet`);
+  const html = await readFile(`${dist}/index.html`, 'utf8');
+  const headers = await readFile(`${dist}/_headers`, 'utf8');
+  for (const [name, text] of [['index.html', html], [cssName, css], ['_headers', headers]]) {
+    assert.doesNotMatch(text, /googleapis|gstatic|fonts\.google/i, `${name} must not reach Google Fonts`);
+  }
+  const rules = parseHeaders(headers);
+  const csp = headersFor(rules, '/')['content-security-policy'];
+  const directives = Object.fromEntries(csp.split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+  assert.deepEqual(directives['style-src'], ["'self'"]);
+  assert.deepEqual(directives['font-src'], ["'self'"]);
+  assert.deepEqual(directives['default-src'], ["'none'"]);
+  for (const f of fonts) assert.match(headersFor(rules, `/assets/${f}`)['cache-control'] ?? '', /immutable/, `${f} is hashed, so it may be cached for good`);
+});
+
+test('every request stays on this site, every declared font face loads from it, and the console stays clean', async () => {
+  const specs = [
+    ['500 16px "Barlow Condensed"', 'knot'],
+    ['600 16px "Barlow Condensed"', 'knot'],
+    ['700 16px "Barlow Condensed"', 'knot'],
+    ['400 16px "IBM Plex Mono"', 'knot'],
+    ['500 16px "IBM Plex Mono"', 'knot'],
+    ['400 16px "Source Serif 4"', 'knot Δ tᵏ'],
+    ['600 16px "Source Serif 4"', 'knot Δ tᵏ'],
+    ['italic 400 16px "Source Serif 4"', 'knot Δ'],
+  ];
+  await withPage({ width: 1280, height: 800 }, async (b) => {
+    await b.goto(base);
+    await b.evaluate('document.getElementById("working").open = true');
+    await b.evaluate(`Promise.all(${JSON.stringify(specs)}.map(([f, t]) => document.fonts.load(f, t))).then(() => document.fonts.ready).then(() => true)`);
+    const urls = await b.evaluate('performance.getEntriesByType("resource").map((e) => e.name)');
+    assert.deepEqual(urls.filter((u) => !u.startsWith(base)), [], 'no request left this site');
+    const checks = await b.evaluate(`${JSON.stringify(specs)}.map(([f, t]) => [f, document.fonts.check(f, t)])`);
+    for (const [font, ok] of checks) assert.equal(ok, true, `document.fonts.check(${font})`);
+    const faces = await b.evaluate('[...document.fonts].map((f) => `${f.family.replace(/"/g, "")} ${f.style} ${f.weight} ${f.status}`)');
+    assert.equal(faces.length, 13, `13 declared faces: ${faces.join(', ')}`);
+    assert.deepEqual(faces.filter((f) => !f.endsWith(' loaded')), [], 'every declared face loaded');
+    const fontUrls = urls.filter((u) => u.endsWith('.woff2'));
+    assert.equal(fontUrls.length, FONT_FILES.length, `every font file fetched from this site: ${fontUrls.join(', ')}`);
+    assert.deepEqual(b.problems, [], 'no console errors or CSP violations');
+  });
+});
+
 test('third-party notices ship in dist/ and are linked from the colophon', async () => {
   const text = await readFile(`${dist}/THIRD-PARTY-NOTICES.txt`, 'utf8');
   const three = JSON.parse(await readFile(fileURLToPath(new URL('../../node_modules/three/package.json', import.meta.url)), 'utf8'));
   assert.match(text, new RegExp(`three\\.js ${three.version.replace(/\./g, '\\.')}`));
   assert.match(text, /Copyright © 2010-2026 three\.js authors/);
   assert.match(text, /Permission is hereby granted/);
-  for (const font of ['Barlow Condensed', 'Source Serif 4', 'IBM Plex Mono']) assert.match(text, new RegExp(font));
-  assert.match(text, /Open Font License/);
+  for (const font of ['Barlow Condensed 1.408', 'Source Serif 4 4.004', 'IBM Plex Mono 2.3']) assert.match(text, new RegExp(font));
+  for (const line of [
+    'Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)',
+    'Copyright 2014 The Source Serif 4 Project Authors (https://github.com/adobe-fonts/source-serif)',
+    "with Reserved Font Name ‘Source’",
+    'Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"',
+  ]) assert.ok(text.includes(line), `notices carry: ${line}`);
+  for (const f of await hashedFonts()) assert.ok(text.includes(`assets/${f}`), `notices list ${f}`);
+  assert.equal(text.split('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007').length, 2, 'the full OFL 1.1 text, once');
+  assert.match(text, /PERMISSION & CONDITIONS/);
+  assert.doesNotMatch(text, /loaded from Google Fonts|googleapis|gstatic/);
   assert.match(text, /Rolfsen/);
   assert.match(text, /KnotInfo/);
   await withPage({ width: 1000, height: 800 }, async (b) => {
