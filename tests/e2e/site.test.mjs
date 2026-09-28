@@ -3,7 +3,9 @@
 // work, hostile links are refused quickly, and the page fits a true 400 px phone screen.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launch, sleep } from '../../scripts/cdp.mjs';
 import { headersFor, parseHeaders, startServer } from '../../scripts/serve.mjs';
@@ -281,6 +283,32 @@ test('cache rules: long cache only on hashed assets', async () => {
     assert.match(headersFor(rules, `/${a}`)['cache-control'], /immutable/);
   }
   assert.doesNotMatch(headersFor(rules, '/THIRD-PARTY-NOTICES.txt')['cache-control'] ?? '', /max-age/);
+});
+
+test('the local server never serves files from outside the folder it was given', async () => {
+  // A sibling folder whose name starts with the served folder's name ("dist" and "dist-other")
+  // passes a plain prefix check, so an encoded "../" could reach it.
+  const tmp = await mkdtemp(join(tmpdir(), 'knot-serve-'));
+  try {
+    await mkdir(join(tmp, 'dist'));
+    await mkdir(join(tmp, 'dist-other'));
+    await writeFile(join(tmp, 'dist', 'index.html'), 'inside');
+    await writeFile(join(tmp, 'dist-other', 'note.txt'), 'outside');
+    const s = await startServer(join(tmp, 'dist'), 0);
+    try {
+      const at = (p) => fetch(`http://127.0.0.1:${s.address().port}${p}`).then(async (r) => [r.status, await r.text()]);
+      assert.deepEqual(await at('/'), [200, 'inside']);
+      for (const p of ['/..%2fdist-other%2fnote.txt', '/%2e%2e%2fdist-other%2fnote.txt', '/..%2f..%2fdist-other%2fnote.txt']) {
+        const [status, body] = await at(p);
+        assert.notEqual(status, 200, p);
+        assert.notEqual(body, 'outside', p);
+      }
+    } finally {
+      s.close();
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
+  }
 });
 
 /** Signs in the crossing list, as "id:+" strings. */

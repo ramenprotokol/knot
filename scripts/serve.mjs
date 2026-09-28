@@ -3,7 +3,7 @@
 // Usage: npm run serve [-- --port 8123]   (default: a random free port)
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const TYPES = {
@@ -56,7 +56,7 @@ export async function startServer(dir, port = 0) {
       let path = decodeURIComponent(url.pathname);
       if (path.endsWith('/')) path += 'index.html';
       const file = normalize(join(dir, path));
-      if (!file.startsWith(normalize(dir))) {
+      if (!file.startsWith(normalize(dir + sep))) {
         res.writeHead(403).end();
         return;
       }
