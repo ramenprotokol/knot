@@ -1,5 +1,5 @@
-# Cloudflare Pages (static only). No account id here on purpose: the owner deploys with
-# ~/RamenProtocol/_ops/infra/ramen-deploy.sh pages dist --project-name knot
+# Cloudflare Pages (static only). No account id here on purpose: the owner deploys
+# through a guarded deploy script (see README), never with a bare `wrangler` login.
 name = "knot"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-09-01"

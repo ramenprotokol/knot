@@ -70,7 +70,7 @@ It is a static site: `dist/` deploys to Cloudflare Pages, which serves static fi
 npx wrangler pages deploy dist --project-name knot
 ```
 
-That is the plain command for anyone deploying their own copy. The owner deploys only through the guarded `ramen-deploy.sh pages dist --project-name knot` script, which refuses unless the project's own Cloudflare account is configured; the repo has no deploy script of its own.
+That is the plain command for anyone deploying their own copy. The owner deploys only through a guarded deploy script, which refuses unless the project's own Cloudflare account is configured; the repo has no deploy script of its own.
 
 `_headers` sets a strict Content-Security-Policy (scripts only from the site itself, fonts from Google Fonts), `no-cache` on the page, and a year-long immutable cache only on the content-hashed files in `/assets/`.
 
